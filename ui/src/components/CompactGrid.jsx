@@ -63,7 +63,7 @@ const CompactGrid = forwardRef(({
 
   useEffect(() => {
     if (gridReady && innerRef.current?.api) {
-      innerRef.current.api.setQuickFilter(quickFilter);
+      innerRef.current.api.setGridOption('quickFilterText', quickFilter);
     }
   }, [quickFilter, gridReady]);
 

@@ -9,15 +9,6 @@
 /* AG Grid theme overrides */
 .ag-theme-alpine,
 .ag-theme-alpine-dark {
-  --ag-header-background-color: oklch(var(--b2));
-  --ag-background-color: oklch(var(--b1));
-  --ag-odd-row-background-color: oklch(var(--b2) / 0.5);
-  --ag-row-hover-color: oklch(var(--p) / 0.08);
-  --ag-selected-row-background-color: oklch(var(--p) / 0.15);
-  --ag-header-foreground-color: oklch(var(--bc));
-  --ag-foreground-color: oklch(var(--bc));
-  --ag-border-color: oklch(var(--b3));
-  --ag-row-border-color: oklch(var(--b3) / 0.5);
   --ag-font-family: inherit;
   --ag-font-size: 12px;
 }
@@ -30,6 +21,9 @@
 }
 .compact-grid .ag-cell-wrapper {
   align-items: center;
+}
+.compact-grid .ag-row {
+  --ag-row-border-width: 0px;
 }
 
 /* Scrollbar styling */
