@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import { AllCommunityModule } from 'ag-grid-community';
-import { Search, Eye, Columns3, X } from 'lucide-react';
+import { Search, Columns3, X } from 'lucide-react';
 
 const CompactGrid = forwardRef(({
   columnDefs,
@@ -157,7 +156,7 @@ const CompactGrid = forwardRef(({
       <div className={`flex-1 ${themeClass} compact-grid`}>
         <AgGridReact
           ref={innerRef}
-          modules={[AllCommunityModule]}
+          theme="legacy"
           rowData={rowData}
           columnDefs={normalizedColumns}
           defaultColDef={{
