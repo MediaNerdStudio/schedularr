@@ -30,18 +30,22 @@ ADMIN_PASSWORD=...
 
 ## Run
 
-Development (backend + Vite HMR, API on :3001, UI on :3000):
+Everything (API + UI) runs on a single port (`PORT`, default 3001).
+
+Development (Vite mounted as middleware inside Express, full HMR):
 
 ```
 npm run dev
 ```
 
-Production build & start (serves everything from one port):
+Production build & start (serves `ui/dist` instead of the Vite middleware):
 
 ```
 npm run build
 npm start
 ```
+
+`npm run dev` and `npm start` are the same command (`node server/index.js`); the server picks dev vs. prod automatically based on whether `ui/dist` exists. Delete/rebuild `ui/dist` to switch modes.
 
 ## Verification
 

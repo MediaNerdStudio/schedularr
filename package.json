@@ -4,9 +4,9 @@
   "description": "Comprehensive music scheduling application for radio stations",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,ui -c blue,green \"nodemon --watch server server/index.js\" \"npm --prefix ui run dev\"",
+    "dev": "nodemon --watch server server/index.js",
     "build": "npm --prefix ui run build",
-    "start": "cross-env NODE_ENV=production node server/index.js",
+    "start": "node server/index.js",
     "lint": "npm --prefix ui run lint"
   },
   "keywords": [
