@@ -84,7 +84,7 @@ const CompactGrid = forwardRef(({
   const toggleColumn = (key) => {
     if (!innerRef.current?.api) return;
     const nextVisible = !visibility[key];
-    innerRef.current.api.setColumnVisible(key, nextVisible);
+    innerRef.current.api.setColumnsVisible([key], nextVisible);
     setVisibility(v => ({ ...v, [key]: nextVisible }));
   };
 

@@ -176,8 +176,10 @@ export default function CategoriesPage() {
   const handleTreeDrop = async (e, targetCat) => {
     e.preventDefault();
     setDragOverCatId(null);
+    const raw = e.dataTransfer.getData('application/json');
+    if (!raw) return;
     try {
-      const songIds = JSON.parse(e.dataTransfer.getData('application/json'));
+      const songIds = JSON.parse(raw);
       if (!songIds?.length) return;
       const isCopy = e.ctrlKey || e.metaKey;
       if (isCopy) {
@@ -193,6 +195,7 @@ export default function CategoriesPage() {
   };
 
   const handleTreeDragOver = (e, catId) => {
+    if (!e.dataTransfer.types.includes('application/json')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
     setDragOverCatId(catId);
@@ -206,7 +209,7 @@ export default function CategoriesPage() {
     setDraggingId(node._id);
   };
 
-  const handleCatDragOver = (e, targetNode, position) => {
+  const handleCatDragOver = (e, targetNode) => {
     e.preventDefault();
     e.stopPropagation();
     if (!draggingId || draggingId === targetNode._id) {
@@ -215,6 +218,10 @@ export default function CategoriesPage() {
     }
     const dragged = catList.find(c => c._id === draggingId);
     if (!dragged || dragged.parent !== targetNode.parent) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    const position = e.clientY > midpoint ? 'after' : 'before';
     setDropTarget({ id: targetNode._id, position });
   };
 
@@ -352,7 +359,8 @@ export default function CategoriesPage() {
           onContextMenu={e => handleContextMenu(e, node)}
           draggable
           onDragStart={e => handleCatDragStart(e, node)}
-          onDragOver={e => handleCatDragOver(e, node, 'before')}
+          onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
+          onDragOver={e => handleCatDragOver(e, node)}
           onDragLeave={handleCatDragLeave}
           onDrop={e => handleCatDrop(e, node)}
           onDragOverCapture={e => handleTreeDragOver(e, node._id)}
