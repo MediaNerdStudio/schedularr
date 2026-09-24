@@ -4,7 +4,7 @@ import {
   FolderOpen, FolderClosed, Plus, Pencil, Trash2, Music, ChevronRight, ChevronDown,
   Copy, Move, LayoutGrid, Volume2, FileText, Megaphone, Radio
 } from 'lucide-react';
-import { categories, songs } from '../lib/api';
+import { categories } from '../lib/api';
 import { formatDuration, ROTATION_LABELS, CATEGORY_TYPES } from '../lib/utils';
 
 const TYPE_ICONS = {
@@ -24,8 +24,15 @@ export default function CategoriesPage() {
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
-  const [moveMode, setMoveMode] = useState('move'); // 'move' or 'copy'
+  const [moveMode, setMoveMode] = useState('move');
   const [dragOverCatId, setDragOverCatId] = useState(null);
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState(null);
+
+  // Drag-reorder
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null); // { id, position: 'before'|'after' }
 
   const [catForm, setCatForm] = useState({
     code: '', name: '', type: 'music', color: '#3b82f6', rotationLabel: '',
@@ -33,7 +40,6 @@ export default function CategoriesPage() {
     rules: { songSeparation: 0, artistPrimarySeparation: 0, searchDepth: 20 },
   });
 
-  // Load categories
   const loadCategories = async () => {
     try {
       const data = await categories.list();
@@ -47,7 +53,6 @@ export default function CategoriesPage() {
 
   useEffect(() => { loadCategories(); }, []);
 
-  // Load songs when category selected
   const loadSongs = async (catId) => {
     if (!catId) { setCatSongs([]); setSongTotal(0); return; }
     setLoadingSongs(true);
@@ -64,27 +69,35 @@ export default function CategoriesPage() {
 
   useEffect(() => { loadSongs(selectedCat?._id); }, [selectedCat?._id]);
 
-  // Build tree structure
+  // Build tree and parent map
   const buildTree = (cats) => {
     const map = new Map();
     const roots = [];
+    const parentMap = new Map();
     for (const cat of cats) {
       map.set(cat._id, { ...cat, children: [] });
     }
     for (const cat of cats) {
       const node = map.get(cat._id);
       if (cat.parent && map.has(cat.parent)) {
-        map.get(cat.parent).children.push(node);
+        const parent = map.get(cat.parent);
+        parent.children.push(node);
+        parentMap.set(cat._id, parent);
       } else {
         roots.push(node);
       }
     }
-    return roots;
+    return { roots, parentMap };
   };
 
-  const tree = buildTree(catList);
+  const { tree, parentMap } = buildTree(catList);
 
-  // Toggle expand
+  const effectiveColor = (cat) => {
+    if (cat.color) return cat.color;
+    const parent = cat.parent && parentMap.get(cat._id);
+    return parent?.color || '#6b7280';
+  };
+
   const toggleExpand = (catId) => {
     setExpandedIds(prev => {
       const next = new Set(prev);
@@ -93,11 +106,10 @@ export default function CategoriesPage() {
     });
   };
 
-  // Category CRUD
   const openCreateCat = (parentId = null) => {
     setEditingCat(null);
     setCatForm({
-      code: '', name: '', type: 'music', color: '#3b82f6', rotationLabel: '',
+      code: '', name: '', type: 'music', color: parentId ? '' : '#3b82f6', rotationLabel: '',
       parent: parentId || '', description: '',
       rules: { songSeparation: 0, artistPrimarySeparation: 0, searchDepth: 20 },
     });
@@ -107,7 +119,7 @@ export default function CategoriesPage() {
   const openEditCat = (cat) => {
     setEditingCat(cat);
     setCatForm({
-      code: cat.code, name: cat.name, type: cat.type, color: cat.color,
+      code: cat.code, name: cat.name, type: cat.type, color: cat.color || '',
       rotationLabel: cat.rotationLabel || '', parent: cat.parent || '',
       description: cat.description || '',
       rules: { ...cat.rules },
@@ -137,7 +149,6 @@ export default function CategoriesPage() {
       : `Delete "${cat.name}"? ${cat.songCount || 0} songs will be uncategorized.`;
     if (!confirm(msg)) return;
     try {
-      // Delete children first
       if (childCount > 0) {
         for (const child of catList.filter(c => c.parent === cat._id)) {
           await categories.delete(child._id);
@@ -151,13 +162,12 @@ export default function CategoriesPage() {
     }
   };
 
-  // Song selection
   const onSelectionChanged = useCallback((event) => {
     const rows = event.api.getSelectedRows() || [];
     setSelectedSongIds(rows.map(r => r._id));
   }, []);
 
-  // Drag-drop from grid to tree
+  // Songs -> category drop
   const handleDragStart = (e, songIds) => {
     e.dataTransfer.setData('application/json', JSON.stringify(songIds));
     e.dataTransfer.effectAllowed = 'copyMove';
@@ -169,7 +179,6 @@ export default function CategoriesPage() {
     try {
       const songIds = JSON.parse(e.dataTransfer.getData('application/json'));
       if (!songIds?.length) return;
-      // If holding Ctrl/Cmd = copy, otherwise move
       const isCopy = e.ctrlKey || e.metaKey;
       if (isCopy) {
         await categories.bulkCopy(songIds, targetCat._id);
@@ -189,16 +198,67 @@ export default function CategoriesPage() {
     setDragOverCatId(catId);
   };
 
-  // Bulk move/copy via modal
+  // Category reorder drag-drop
+  const handleCatDragStart = (e, node) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('category/id', node._id);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggingId(node._id);
+  };
+
+  const handleCatDragOver = (e, targetNode, position) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggingId || draggingId === targetNode._id) {
+      setDropTarget(null);
+      return;
+    }
+    const dragged = catList.find(c => c._id === draggingId);
+    if (!dragged || dragged.parent !== targetNode.parent) return;
+    setDropTarget({ id: targetNode._id, position });
+  };
+
+  const handleCatDragLeave = () => setDropTarget(null);
+
+  const handleCatDrop = async (e, targetNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropTarget(null);
+    const draggedId = draggingId;
+    setDraggingId(null);
+    if (!draggedId || draggedId === targetNode._id) return;
+
+    const dragged = catList.find(c => c._id === draggedId);
+    if (!dragged || dragged.parent !== targetNode.parent) return;
+
+    const parentId = targetNode.parent;
+    const siblings = catList
+      .filter(c => c.parent === parentId && c._id !== draggedId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+
+    const targetIndex = siblings.findIndex(c => c._id === targetNode._id);
+    if (targetIndex < 0) return;
+
+    const insertIndex = dropTarget?.position === 'after' ? targetIndex + 1 : targetIndex;
+    siblings.splice(insertIndex, 0, dragged);
+
+    const items = siblings.map((c, i) => ({ id: c._id, sortOrder: i, parent: c.parent }));
+    try {
+      await categories.reorder(items);
+      loadCategories();
+    } catch (err) {
+      alert(err.response?.data?.error || err.message);
+    }
+  };
+
+  // Bulk song actions
   const openBulkMove = (mode) => {
     if (selectedSongIds.length === 0) return;
     setMoveMode(mode);
     setShowMoveModal(true);
   };
 
-  const clearSelection = () => {
-    setSelectedSongIds([]);
-  };
+  const clearSelection = () => setSelectedSongIds([]);
 
   const executeBulkAction = async (targetCatId) => {
     try {
@@ -229,7 +289,15 @@ export default function CategoriesPage() {
     }
   };
 
-  // AG Grid columns
+  // Context menu
+  const handleContextMenu = (e, node) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, node });
+  };
+
+  const closeContextMenu = () => setContextMenu(null);
+
   const columnDefs = [
     {
       headerName: '', colId: 'select', width: 40, checkboxSelection: true, headerCheckboxSelection: true,
@@ -257,32 +325,40 @@ export default function CategoriesPage() {
     },
   ];
 
-  const defaultColDef = {
-    sortable: true, filter: true, resizable: true,
-  };
+  const defaultColDef = { sortable: true, filter: true, resizable: true };
 
-  // Render tree node
   const renderTreeNode = (node, depth = 0) => {
     const hasChildren = node.children?.length > 0;
     const isExpanded = expandedIds.has(node._id);
     const isSelected = selectedCat?._id === node._id;
     const isDragOver = dragOverCatId === node._id;
+    const isDragging = draggingId === node._id;
+    const isDropBefore = dropTarget?.id === node._id && dropTarget?.position === 'before';
+    const isDropAfter = dropTarget?.id === node._id && dropTarget?.position === 'after';
     const Icon = TYPE_ICONS[node.type] || Music;
+    const isRoot = !node.parent;
 
     return (
       <div key={node._id}>
+        {isDropBefore && <div className="h-0.5 bg-primary my-0.5" />}
         <div
-          className={`flex items-center gap-1 py-1 px-2 rounded cursor-pointer transition-colors text-sm group
+          className={`flex items-center gap-1.5 py-1 px-2 rounded cursor-pointer transition-colors text-sm select-none
             ${isSelected ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-base-300/50'}
             ${isDragOver ? 'bg-primary/25 outline outline-1 outline-primary' : ''}
+            ${isDragging ? 'opacity-40' : ''}
           `}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => setSelectedCat(node)}
-          onDragOver={e => handleTreeDragOver(e, node._id)}
-          onDragLeave={() => setDragOverCatId(null)}
-          onDrop={e => handleTreeDrop(e, node)}
+          onContextMenu={e => handleContextMenu(e, node)}
+          draggable
+          onDragStart={e => handleCatDragStart(e, node)}
+          onDragOver={e => handleCatDragOver(e, node, 'before')}
+          onDragLeave={handleCatDragLeave}
+          onDrop={e => handleCatDrop(e, node)}
+          onDragOverCapture={e => handleTreeDragOver(e, node._id)}
+          onDragLeaveCapture={() => setDragOverCatId(null)}
+          onDropCapture={e => handleTreeDrop(e, node)}
         >
-          {/* Expand toggle */}
           <button
             className="w-4 h-4 flex items-center justify-center shrink-0"
             onClick={e => { e.stopPropagation(); if (hasChildren) toggleExpand(node._id); }}
@@ -294,40 +370,31 @@ export default function CategoriesPage() {
             ) : <span className="w-3" />}
           </button>
 
-          {/* Category color dot & icon */}
-          <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: node.color }}>
-            {hasChildren || depth === 0
-              ? (isExpanded ? <FolderOpen className="w-2.5 h-2.5 text-white" /> : <FolderClosed className="w-2.5 h-2.5 text-white" />)
-              : <Icon className="w-2.5 h-2.5 text-white" />
-            }
-          </div>
+          {/* Color dot only for root categories; subcats inherit parent color */}
+          {isRoot ? (
+            <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: effectiveColor(node) }}>
+              {hasChildren
+                ? (isExpanded ? <FolderOpen className="w-2.5 h-2.5 text-white" /> : <FolderClosed className="w-2.5 h-2.5 text-white" />)
+                : <Icon className="w-2.5 h-2.5 text-white" />
+              }
+            </div>
+          ) : (
+            <div className="w-4 h-4 flex items-center justify-center shrink-0">
+              <Icon className="w-3 h-3 text-base-content/50" />
+            </div>
+          )}
 
-          {/* Name + count */}
           <span className="truncate flex-1">{node.name}</span>
           <span className="text-xs text-base-content/30 tabular-nums">{node.songCount || 0}</span>
 
-          {/* Rotation badge */}
           {node.rotationLabel && (
-            <span className={`text-[10px] px-1 rounded ${ROTATION_LABELS[node.rotationLabel]?.color || ''}`}>
+            <span className="text-[10px] px-1 rounded bg-base-300 text-base-content/70">
               {ROTATION_LABELS[node.rotationLabel]?.label}
             </span>
           )}
-
-          {/* Context actions */}
-          <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
-            <button className="btn btn-ghost btn-xs px-1 h-5 min-h-0" onClick={e => { e.stopPropagation(); openCreateCat(node._id); }} title="Add subcategory">
-              <Plus className="w-3 h-3" />
-            </button>
-            <button className="btn btn-ghost btn-xs px-1 h-5 min-h-0" onClick={e => { e.stopPropagation(); openEditCat(node); }} title="Edit">
-              <Pencil className="w-3 h-3" />
-            </button>
-            <button className="btn btn-ghost btn-xs px-1 h-5 min-h-0 text-error" onClick={e => { e.stopPropagation(); deleteCat(node); }} title="Delete">
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
         </div>
+        {isDropAfter && <div className="h-0.5 bg-primary my-0.5" />}
 
-        {/* Children */}
         {hasChildren && isExpanded && (
           <div>
             {node.children
@@ -351,7 +418,7 @@ export default function CategoriesPage() {
             <LayoutGrid className="w-4 h-4 text-primary" />
             Categories
           </h2>
-          <button className="btn btn-primary btn-xs" onClick={() => openCreateCat(null)}>
+          <button className="btn btn-primary btn-xs" onClick={() => openCreateCat(null)} title="New root category">
             <Plus className="w-3 h-3" />
           </button>
         </div>
@@ -369,7 +436,6 @@ export default function CategoriesPage() {
           )}
         </div>
 
-        {/* Tree stats */}
         <div className="p-2 border-t border-base-300 text-xs text-base-content/40">
           {catList.length} categories | {catList.reduce((s, c) => s + (c.songCount || 0), 0)} assignments
         </div>
@@ -377,11 +443,10 @@ export default function CategoriesPage() {
 
       {/* Right: Song Explorer */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Explorer header */}
         <div className="flex items-center gap-3 p-3 border-b border-base-300">
           {selectedCat ? (
             <>
-              <div className="w-6 h-6 rounded flex items-center justify-center" style={{ backgroundColor: selectedCat.color }}>
+              <div className="w-6 h-6 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: effectiveColor(selectedCat) }}>
                 <Music className="w-3 h-3 text-white" />
               </div>
               <div className="flex-1 min-w-0">
@@ -398,7 +463,6 @@ export default function CategoriesPage() {
           )}
         </div>
 
-        {/* AG Grid */}
         <div className="flex-1 min-h-0">
           {selectedCat ? (
             loadingSongs ? (
@@ -445,6 +509,37 @@ export default function CategoriesPage() {
         </div>
       </div>
 
+      {/* Context Menu */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={closeContextMenu} />
+          <div
+            className="fixed z-50 w-44 bg-base-100 border border-base-300 rounded-lg shadow-xl py-1"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+          >
+            <button
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 flex items-center gap-2"
+              onClick={() => { openCreateCat(contextMenu.node._id); closeContextMenu(); }}
+            >
+              <Plus className="w-3.5 h-3.5" /> Add subcategory
+            </button>
+            <button
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 flex items-center gap-2"
+              onClick={() => { openEditCat(contextMenu.node); closeContextMenu(); }}
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+            <div className="divider my-1" />
+            <button
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 text-error flex items-center gap-2"
+              onClick={() => { deleteCat(contextMenu.node); closeContextMenu(); }}
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Category Create/Edit Modal */}
       {showCatModal && (
         <div className="modal modal-open">
@@ -453,7 +548,7 @@ export default function CategoriesPage() {
             <div className="grid grid-cols-2 gap-3 mt-4">
               <div className="form-control">
                 <label className="label"><span className="label-text">Code</span></label>
-                <input className="input input-bordered input-sm font-mono uppercase" maxLength={6}
+                <input className="input input-bordered input-sm font-mono uppercase" maxLength={16}
                   value={catForm.code} onChange={e => setCatForm({ ...catForm, code: e.target.value.toUpperCase() })} placeholder="e.g., POWR" />
               </div>
               <div className="form-control">
@@ -467,7 +562,7 @@ export default function CategoriesPage() {
                   value={catForm.parent} onChange={e => setCatForm({ ...catForm, parent: e.target.value })}>
                   <option value="">None (root level)</option>
                   {catList
-                    .filter(c => c._id !== editingCat?._id) // prevent self-reference
+                    .filter(c => c._id !== editingCat?._id)
                     .map(c => <option key={c._id} value={c._id}>{c.name}</option>)
                   }
                 </select>
@@ -487,14 +582,16 @@ export default function CategoriesPage() {
                   {Object.entries(ROTATION_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div className="form-control">
-                <label className="label"><span className="label-text">Color</span></label>
-                <div className="flex items-center gap-2">
-                  <input type="color" className="w-8 h-8 rounded cursor-pointer"
-                    value={catForm.color} onChange={e => setCatForm({ ...catForm, color: e.target.value })} />
-                  <span className="text-xs font-mono text-base-content/40">{catForm.color}</span>
+              {!catForm.parent && (
+                <div className="form-control">
+                  <label className="label"><span className="label-text">Color</span></label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" className="w-8 h-8 rounded cursor-pointer"
+                      value={catForm.color || '#3b82f6'} onChange={e => setCatForm({ ...catForm, color: e.target.value })} />
+                    <span className="text-xs font-mono text-base-content/40">{catForm.color || 'inherited'}</span>
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="form-control col-span-2">
                 <label className="label"><span className="label-text">Description</span></label>
                 <input className="input input-bordered input-sm"
@@ -543,7 +640,7 @@ export default function CategoriesPage() {
                     className="flex items-center gap-2 w-full p-2 rounded hover:bg-base-200 text-left text-sm"
                     onClick={() => executeBulkAction(cat._id)}
                   >
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: cat.color }} />
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: effectiveColor(cat) }} />
                     <span className="font-mono text-xs text-base-content/40 w-14">{cat.code}</span>
                     <span className="flex-1 truncate">{cat.name}</span>
                     <span className="text-xs text-base-content/30">{cat.songCount || 0}</span>

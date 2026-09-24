@@ -37,6 +37,9 @@ router.post('/', async (req, res) => {
     if (!req.body.folders?.length) {
       req.body.folders = [{ name: 'Default', exposure: 100 }];
     }
+    if (req.body.parent) {
+      req.body.color = '';
+    }
     const category = await Category.create(req.body);
     res.status(201).json(category);
   } catch (err) {
@@ -168,6 +171,9 @@ router.get('/:id/songs', async (req, res) => {
 // Update category
 router.put('/:id', async (req, res) => {
   try {
+    if (req.body.parent) {
+      req.body.color = '';
+    }
     const category = await Category.findByIdAndUpdate(req.params.id, req.body, { returnDocument: "after", runValidators: true });
     if (!category) return res.status(404).json({ error: 'Category not found' });
     res.json(category);
