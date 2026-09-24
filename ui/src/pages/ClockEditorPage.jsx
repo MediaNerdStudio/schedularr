@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Save, Plus, Trash2, GripVertical, Clock,
-  Music, Volume2, FileText, Terminal, Users, List, Radio as RadioIcon
+  Music, Volume2, FileText, Terminal, Users, List, Radio as RadioIcon,
+  FolderClosed, FolderOpen, Search
 } from 'lucide-react';
-import { clocks, categories as categoriesApi } from '../lib/api';
+import { clocks, categories as categoriesApi, songs as songsApi } from '../lib/api';
 import { CLOCK_ELEMENT_TYPES, formatDuration, parseDuration } from '../lib/utils';
 
 const ELEMENT_ICONS = {
@@ -23,7 +24,21 @@ export default function ClockEditorPage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showAddElement, setShowAddElement] = useState(false);
-  const [newElement, setNewElement] = useState({ type: 'fixed', category: '', label: '' });
+  const [newElement, setNewElement] = useState({ type: 'fixed', category: '', song: '', label: '' });
+  const [songQuery, setSongQuery] = useState('');
+  const [songResults, setSongResults] = useState([]);
+  const [selectedSong, setSelectedSong] = useState(null);
+
+  useEffect(() => {
+    if (!songQuery.trim()) {
+      setSongResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      songsApi.list({ q: songQuery, limit: 20 }).then(r => setSongResults(r.songs));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [songQuery]);
 
   useEffect(() => {
     Promise.all([clocks.get(id), categoriesApi.list()]).then(([clockData, catData]) => {
@@ -50,19 +65,24 @@ export default function ClockEditorPage() {
     const elements = [...(clock.elements || [])];
     const position = elements.length;
     const cat = categoryList.find(c => c._id === newElement.category);
+    const songLabel = selectedSong ? `${selectedSong.title} — ${selectedSong.artistDisplay || selectedSong.primaryArtist?.name || ''}` : '';
     elements.push({
       type: newElement.type,
       position,
       category: newElement.category || undefined,
-      label: newElement.label || cat?.name || CLOCK_ELEMENT_TYPES[newElement.type]?.label || '',
-      estimatedDuration: 0,
+      song: newElement.song || undefined,
+      label: newElement.label || (newElement.type === 'song' ? songLabel : cat?.name) || CLOCK_ELEMENT_TYPES[newElement.type]?.label || '',
+      estimatedDuration: newElement.type === 'song' ? (selectedSong?.duration || 0) : 0,
       isPinned: true,
       text: '',
     });
     setClock({ ...clock, elements });
     setDirty(true);
     setShowAddElement(false);
-    setNewElement({ type: 'fixed', category: '', label: '' });
+    setNewElement({ type: 'fixed', category: '', song: '', label: '' });
+    setSongQuery('');
+    setSongResults([]);
+    setSelectedSong(null);
   };
 
   const removeElement = (index) => {
@@ -274,7 +294,12 @@ export default function ClockEditorPage() {
               <div className="form-control col-span-2">
                 <label className="label"><span className="label-text">Type</span></label>
                 <select className="select select-bordered select-sm" value={newElement.type}
-                  onChange={e => setNewElement({ ...newElement, type: e.target.value })}>
+                  onChange={e => {
+                    setNewElement({ ...newElement, type: e.target.value, category: '', song: '', label: '' });
+                    setSongQuery('');
+                    setSongResults([]);
+                    setSelectedSong(null);
+                  }}>
                   {Object.entries(CLOCK_ELEMENT_TYPES).map(([k, v]) => (
                     <option key={k} value={k}>{v.label}</option>
                   ))}
@@ -283,13 +308,73 @@ export default function ClockEditorPage() {
               {['fixed', 'migrating', 'imaging'].includes(newElement.type) && (
                 <div className="form-control col-span-2">
                   <label className="label"><span className="label-text">Category</span></label>
-                  <select className="select select-bordered select-sm" value={newElement.category}
-                    onChange={e => setNewElement({ ...newElement, category: e.target.value })}>
-                    <option value="">Select category...</option>
-                    {categoryList.map(c => (
-                      <option key={c._id} value={c._id}>{c.code} - {c.name}</option>
+                  <div className="border border-base-300 rounded-lg p-1 max-h-48 overflow-y-auto">
+                    {(() => {
+                      const map = {};
+                      const roots = [];
+                      for (const c of categoryList) map[c._id] = { ...c, children: [] };
+                      for (const c of categoryList) {
+                        if (c.parent && map[c.parent]) map[c.parent].children.push(map[c._id]);
+                        else roots.push(map[c._id]);
+                      }
+                      roots.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+                      const render = (nodes, depth = 0) => nodes.map(cat => {
+                        const hasChildren = cat.children?.length > 0;
+                        const selected = newElement.category === cat._id;
+                        return (
+                          <div key={cat._id}>
+                            <button
+                              className={`flex items-center gap-1.5 w-full py-1 px-2 rounded text-left text-sm ${selected ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-base-200'}`}
+                              style={{ paddingLeft: `${depth * 16 + 8}px` }}
+                              onClick={() => setNewElement({ ...newElement, category: cat._id, label: newElement.label || cat.name })}
+                            >
+                              {hasChildren
+                                ? <FolderOpen className="w-3 h-3 text-base-content/50" />
+                                : <Music className="w-3 h-3 text-base-content/50" />
+                              }
+                              <span className="truncate flex-1">{cat.name}</span>
+                              <span className="font-mono text-[10px] text-base-content/30">{cat.code}</span>
+                            </button>
+                            {hasChildren && render(cat.children.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)), depth + 1)}
+                          </div>
+                        );
+                      });
+                      return render(roots);
+                    })()}
+                  </div>
+                </div>
+              )}
+              {newElement.type === 'song' && (
+                <div className="form-control col-span-2">
+                  <label className="label"><span className="label-text">Specific song</span></label>
+                  <div className="join w-full">
+                    <div className="join-item flex items-center px-2 bg-base-200"><Search className="w-3.5 h-3.5 text-base-content/40" /></div>
+                    <input
+                      className="input input-bordered input-sm join-item flex-1"
+                      placeholder="Search title or artist..."
+                      value={songQuery}
+                      onChange={e => { setSongQuery(e.target.value); setSelectedSong(null); }}
+                    />
+                  </div>
+                  <div className="mt-1 border border-base-300 rounded-lg max-h-40 overflow-y-auto">
+                    {songResults.length === 0 && songQuery.trim() && (
+                      <p className="text-xs text-base-content/40 p-2">No songs found</p>
+                    )}
+                    {songResults.map(song => (
+                      <button
+                        key={song._id}
+                        className={`flex items-center gap-2 w-full px-2 py-1 text-left text-sm hover:bg-base-200 ${selectedSong?._id === song._id ? 'bg-primary/10 ring-1 ring-primary' : ''}`}
+                        onClick={() => { setSelectedSong(song); setNewElement({ ...newElement, song: song._id, label: `${song.title} — ${song.artistDisplay || ''}` }); }}
+                      >
+                        <Music className="w-3 h-3 text-base-content/50" />
+                        <span className="truncate flex-1">{song.title}</span>
+                        <span className="text-xs text-base-content/40 truncate max-w-28">{song.artistDisplay || song.primaryArtist?.name || ''}</span>
+                      </button>
                     ))}
-                  </select>
+                  </div>
+                  {selectedSong && (
+                    <p className="text-xs text-base-content/50 mt-1">Selected: {selectedSong.title} — {selectedSong.artistDisplay || selectedSong.primaryArtist?.name || ''}</p>
+                  )}
                 </div>
               )}
               <div className="form-control col-span-2">

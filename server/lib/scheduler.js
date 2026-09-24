@@ -153,6 +153,12 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
         });
         break;
       }
+      case 'song': {
+        item = await scheduleSpecificSong(element, {
+          rules, categoryMap, playLog, estimatedStart, stats,
+        });
+        break;
+      }
       case 'note': {
         item = {
           position: element.position,
@@ -324,6 +330,70 @@ async function scheduleFixedElement(element, ctx) {
       severity: v.severity,
       description: v.description,
     })),
+    reconcileStatus: 'pending',
+    isManuallyPlaced: false,
+    isLocked: false,
+  };
+}
+
+/**
+ * Schedule a specific fixed song element (e.g., a news service song).
+ */
+async function scheduleSpecificSong(element, ctx) {
+  const { rules, categoryMap, playLog, estimatedStart, stats } = ctx;
+  const songId = element.song?._id?.toString?.() || element.song?.toString?.() || element.song;
+
+  if (!songId) {
+    return {
+      position: element.position,
+      type: 'empty',
+      title: `[No song] ${element.label || ''}`,
+      duration: element.estimatedDuration || 0,
+    };
+  }
+
+  const song = await Song.findById(songId)
+    .populate('primaryArtist', 'name separationGroup')
+    .lean();
+
+  if (!song) {
+    return {
+      position: element.position,
+      type: 'empty',
+      title: `[Song not found] ${element.label || ''}`,
+      duration: element.estimatedDuration || 0,
+    };
+  }
+
+  let violations = [];
+  let hasUnbreakable = false;
+  let category;
+  if (element.category) {
+    const categoryId = element.category._id?.toString?.() || element.category.toString();
+    category = categoryMap.get(categoryId);
+  }
+
+  if (category) {
+    const evaluation = evaluateRules(song, category, rules, playLog, estimatedStart);
+    violations = evaluation.violations;
+    hasUnbreakable = evaluation.hasUnbreakable;
+    stats.totalViolations += evaluation.totalViolations;
+  }
+
+  return {
+    position: element.position,
+    type: 'song',
+    song: song._id,
+    category: category?._id || element.category || null,
+    title: song.title,
+    artist: song.artistDisplay || song.primaryArtist?.name || '',
+    duration: song.duration || element.estimatedDuration || 0,
+    ruleViolations: violations.map(v => ({
+      ruleName: v.ruleName,
+      severity: v.severity,
+      description: v.description,
+    })),
+    unbreakable: hasUnbreakable,
     reconcileStatus: 'pending',
     isManuallyPlaced: false,
     isLocked: false,

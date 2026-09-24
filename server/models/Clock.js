@@ -16,6 +16,7 @@ const clockElementSchema = new mongoose.Schema({
       'time-marker',  // Time marker (target time)
       'imaging',      // Radio imaging (pick random from category)
       'special-set',  // Theme/multi-song set
+      'song',         // Specific fixed song
     ],
     required: true,
   },
@@ -24,6 +25,9 @@ const clockElementSchema = new mongoose.Schema({
   // For fixed/migrating/imaging elements
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
   folder: { type: mongoose.Schema.Types.ObjectId }, // specific folder within category
+
+  // For specific-song elements
+  song: { type: mongoose.Schema.Types.ObjectId, ref: 'Song' },
 
   // For migrating elements — multiple category options
   migratingCategories: [{

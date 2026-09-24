@@ -58,6 +58,7 @@ export const CLOCK_ELEMENT_TYPES = {
   'time-marker': { label: 'Time Marker', color: 'bg-cyan-500' },
   'imaging': { label: 'Imaging', color: 'bg-emerald-500' },
   'special-set': { label: 'Special Set', color: 'bg-rose-500' },
+  'song': { label: 'Specific Song', color: 'bg-red-500' },
 };
 
 // Day names
