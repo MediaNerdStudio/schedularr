@@ -1,0 +1,63 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+/* AG Grid theme overrides */
+.ag-theme-alpine {
+  --ag-header-background-color: oklch(var(--b2));
+  --ag-background-color: oklch(var(--b1));
+  --ag-odd-row-background-color: oklch(var(--b2) / 0.5);
+  --ag-row-hover-color: oklch(var(--p) / 0.08);
+  --ag-selected-row-background-color: oklch(var(--p) / 0.15);
+  --ag-header-foreground-color: oklch(var(--bc));
+  --ag-foreground-color: oklch(var(--bc));
+  --ag-border-color: oklch(var(--b3));
+  --ag-row-border-color: oklch(var(--b3) / 0.5);
+  --ag-font-family: inherit;
+  --ag-font-size: 13px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(var(--b2));
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(var(--bc) / 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(var(--bc) / 0.3);
+}
+
+/* Category color dot */
+.category-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Clock element in the pie/list view */
+.clock-element {
+  transition: all 0.15s ease;
+}
+.clock-element:hover {
+  transform: scale(1.02);
+  box-shadow: 0 2px 8px oklch(var(--bc) / 0.1);
+}
+
+/* Rotation label badges */
+.rotation-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
