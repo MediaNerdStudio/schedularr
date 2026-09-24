@@ -613,7 +613,7 @@ function buildPlayLog(history, scheduledHours) {
  * Find the active grid for a station and date.
  */
 async function findActiveGrid(stationId, date) {
-  // Check format calendar first for date-specific override
+  // 1. Format calendar date-specific override (highest priority)
   const calendar = await FormatCalendar.findOne({ station: stationId });
   if (calendar?.dateOverrides?.length) {
     const dateStr = new Date(date).toISOString().slice(0, 10);
@@ -625,9 +625,8 @@ async function findActiveGrid(stationId, date) {
     }
   }
 
-  // Use grid rotation or first active grid
+  // 2. Format calendar grid rotation
   if (calendar?.gridRotation?.length) {
-    // Calculate which week we're in
     const startOfYear = new Date(date.getFullYear(), 0, 1);
     const weekNumber = Math.floor((date - startOfYear) / 604800000);
     const rotIndex = weekNumber % calendar.gridRotation.length;
@@ -635,6 +634,26 @@ async function findActiveGrid(stationId, date) {
     return AssignmentGrid.findById(gridId).populate('hours.clock');
   }
 
-  // Fallback: just use the first active grid for this station
+  // 3. Active period grid for this date (start of day comparisons)
+  const dayStart = new Date(date);
+  dayStart.setHours(0, 0, 0, 0);
+  const periodGrid = await AssignmentGrid.findOne({
+    station: stationId,
+    isActive: true,
+    isDefault: { $ne: true },
+    periodStart: { $lte: dayStart },
+    periodEnd: { $gte: dayStart },
+  }).sort({ periodStart: -1 }).populate('hours.clock');
+  if (periodGrid) return periodGrid;
+
+  // 4. Active default grid for the station
+  const defaultGrid = await AssignmentGrid.findOne({
+    station: stationId,
+    isActive: true,
+    isDefault: true,
+  }).populate('hours.clock');
+  if (defaultGrid) return defaultGrid;
+
+  // 5. Fallback: any active grid
   return AssignmentGrid.findOne({ station: stationId, isActive: true }).populate('hours.clock');
 }

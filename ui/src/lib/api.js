@@ -69,7 +69,10 @@ export const grids = {
   create: (data) => api.post('/grids', data).then(r => r.data),
   update: (id, data) => api.put(`/grids/${id}`, data).then(r => r.data),
   updateHour: (id, data) => api.patch(`/grids/${id}/hours`, data).then(r => r.data),
+  updateHoursBulk: (id, assignments) => api.patch(`/grids/${id}/hours/bulk`, { assignments }).then(r => r.data),
   delete: (id) => api.delete(`/grids/${id}`).then(r => r.data),
+  setDefault: (id) => api.post(`/grids/${id}/set-default`).then(r => r.data),
+  duplicate: (id, data) => api.post(`/grids/${id}/duplicate`, data).then(r => r.data),
   getCalendar: (stationId) => api.get(`/grids/calendar/${stationId}`).then(r => r.data),
   updateCalendar: (stationId, data) => api.put(`/grids/calendar/${stationId}`, data).then(r => r.data),
 };
