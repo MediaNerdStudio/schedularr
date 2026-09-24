@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Save, Plus, Trash2, GripVertical, Clock,
   Music, Volume2, FileText, Terminal, Users, List, Radio as RadioIcon,
-  FolderClosed, FolderOpen, Search
+  FolderClosed, FolderOpen, Search, Type, Bell, Timer
 } from 'lucide-react';
 import { clocks, categories as categoriesApi, songs as songsApi } from '../lib/api';
 import { CLOCK_ELEMENT_TYPES, formatDuration, parseDuration } from '../lib/utils';
@@ -12,8 +12,52 @@ const ELEMENT_ICONS = {
   'fixed': Music, 'migrating': List, 'block': Clock, 'note': FileText,
   'command': Terminal, 'artist-block': Users, 'flow-list': List,
   'traffic': RadioIcon, 'time-marker': Clock, 'imaging': Volume2,
-  'special-set': Music,
+  'special-set': Music, 'song': Music,
 };
+
+const PRESET_ITEMS = [
+  { type: 'note', icon: FileText, label: 'Note' },
+  { type: 'command', icon: Terminal, label: 'Command' },
+  { type: 'time-marker', icon: Timer, label: 'Time Marker' },
+];
+
+function buildCategoryTree(categories) {
+  const map = {};
+  const roots = [];
+  for (const c of categories) map[c._id] = { ...c, children: [] };
+  for (const c of categories) {
+    if (c.parent && map[c.parent]) map[c.parent].children.push(map[c._id]);
+    else roots.push(map[c._id]);
+  }
+  roots.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  return roots;
+}
+
+function renderCategoryTree(nodes, depth, onDragStart) {
+  return nodes.map(cat => {
+    const hasChildren = cat.children?.length > 0;
+    return (
+      <div key={cat._id}>
+        <div
+          draggable
+          onDragStart={e => onDragStart(e, cat)}
+          className="flex items-center gap-1.5 py-1 px-2 rounded cursor-grab hover:bg-base-200 text-xs"
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          title="Drag to add to clock"
+        >
+          {hasChildren ? <FolderOpen className="w-3 h-3 text-base-content/50" /> : <Music className="w-3 h-3 text-base-content/50" />}
+          <span className="truncate flex-1">{cat.name}</span>
+          <span className="font-mono text-[10px] text-base-content/30">{cat.code}</span>
+        </div>
+        {hasChildren && renderCategoryTree(
+          cat.children.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+          depth + 1,
+          onDragStart
+        )}
+      </div>
+    );
+  });
+}
 
 export default function ClockEditorPage() {
   const { id } = useParams();
@@ -28,6 +72,9 @@ export default function ClockEditorPage() {
   const [songQuery, setSongQuery] = useState('');
   const [songResults, setSongResults] = useState([]);
   const [selectedSong, setSelectedSong] = useState(null);
+  const [paletteSongQuery, setPaletteSongQuery] = useState('');
+  const [paletteSongResults, setPaletteSongResults] = useState([]);
+  const [dropIndex, setDropIndex] = useState(null);
 
   useEffect(() => {
     if (!songQuery.trim()) {
@@ -41,12 +88,25 @@ export default function ClockEditorPage() {
   }, [songQuery]);
 
   useEffect(() => {
+    if (!paletteSongQuery.trim()) {
+      setPaletteSongResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      songsApi.list({ q: paletteSongQuery, limit: 20 }).then(r => setPaletteSongResults(r.songs));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [paletteSongQuery]);
+
+  useEffect(() => {
     Promise.all([clocks.get(id), categoriesApi.list()]).then(([clockData, catData]) => {
       setClock(clockData);
       setCategoryList(catData);
       setLoading(false);
     }).catch(() => navigate('/clocks'));
   }, [id]);
+
+  const categoryTree = useMemo(() => buildCategoryTree(categoryList), [categoryList]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -109,15 +169,95 @@ export default function ClockEditorPage() {
     setDirty(true);
   };
 
+  // Drag-and-drop helpers
+  const createElementFromPalette = (payload) => {
+    const type = payload.type;
+    if (type === 'fixed' || type === 'migrating' || type === 'imaging') {
+      const cat = categoryList.find(c => c._id === payload.category);
+      return {
+        type,
+        category: payload.category,
+        label: payload.label || cat?.name || '',
+        estimatedDuration: 0,
+        isPinned: true,
+        text: '',
+      };
+    }
+    if (type === 'song') {
+      return {
+        type: 'song',
+        song: payload.song,
+        label: payload.label || '',
+        estimatedDuration: payload.duration || 0,
+        isPinned: true,
+        text: '',
+      };
+    }
+    return {
+      type,
+      label: payload.label || CLOCK_ELEMENT_TYPES[type]?.label || type,
+      estimatedDuration: 0,
+      isPinned: true,
+      text: '',
+    };
+  };
+
+  const applyDrop = (payload, targetIndex) => {
+    const elements = [...(clock.elements || [])].sort((a, b) => a.position - b.position);
+    if (payload.source === 'palette') {
+      const el = createElementFromPalette(payload.element);
+      elements.splice(targetIndex, 0, el);
+    } else if (payload.source === 'reorder') {
+      const oldIndex = payload.index;
+      if (oldIndex === targetIndex) return;
+      const [moved] = elements.splice(oldIndex, 1);
+      const insertIndex = targetIndex > oldIndex ? targetIndex - 1 : targetIndex;
+      elements.splice(insertIndex, 0, moved);
+    }
+    elements.forEach((el, i) => el.position = i);
+    setClock({ ...clock, elements });
+    setDirty(true);
+  };
+
+  const handleDragStart = (e, payload) => {
+    e.dataTransfer.setData('application/json', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleListDragOver = (e, index) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    setDropIndex(index + (e.clientY > mid ? 1 : 0));
+  };
+
+  const handleListDrop = (e) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('application/json');
+    if (!raw) return;
+    try {
+      const payload = JSON.parse(raw);
+      applyDrop(payload, dropIndex ?? (clock.elements?.length || 0));
+    } catch (err) {
+      console.error(err);
+    }
+    setDropIndex(null);
+  };
+
+  const handleContainerDragOver = (e) => {
+    e.preventDefault();
+    if ((clock.elements || []).length === 0) setDropIndex(0);
+  };
+
   if (loading) return <div className="flex items-center justify-center h-full"><span className="loading loading-spinner loading-lg" /></div>;
   if (!clock) return null;
 
   const totalDuration = (clock.elements || []).reduce((sum, el) => sum + (el.estimatedDuration || 0), 0);
 
   return (
-    <div className="p-6">
+    <div className="p-6 h-[calc(100vh-4rem)] flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex items-center gap-4 mb-4 shrink-0">
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/clocks')}>
           <ArrowLeft className="w-4 h-4" />
         </button>
@@ -135,9 +275,87 @@ export default function ClockEditorPage() {
         </button>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex gap-4 flex-1 min-h-0">
+        {/* Left palette */}
+        <div className="w-64 shrink-0 flex flex-col gap-3 overflow-hidden">
+          <div className="bg-base-200 rounded-lg p-3 flex flex-col gap-2 flex-1 min-h-0">
+            <h3 className="text-xs font-semibold text-base-content/60 uppercase tracking-wide">Palette</h3>
+
+            <div className="flex-1 overflow-y-auto min-h-0 border border-base-300 rounded-lg p-1 bg-base-100">
+              <div className="text-[10px] font-semibold text-base-content/40 px-1 py-1">Categories</div>
+              {renderCategoryTree(categoryTree, 0, (e, cat) => handleDragStart(e, {
+                source: 'palette',
+                element: {
+                  type: cat.type === 'imaging' ? 'imaging' : 'fixed',
+                  category: cat._id,
+                  label: cat.name,
+                },
+              }))}
+            </div>
+
+            <div className="border border-base-300 rounded-lg p-2 bg-base-100 flex flex-col gap-2">
+              <div className="text-[10px] font-semibold text-base-content/40">Songs</div>
+              <div className="join w-full">
+                <div className="join-item flex items-center px-2 bg-base-200"><Search className="w-3 h-3 text-base-content/40" /></div>
+                <input
+                  className="input input-bordered input-xs join-item flex-1"
+                  placeholder="Search..."
+                  value={paletteSongQuery}
+                  onChange={e => setPaletteSongQuery(e.target.value)}
+                />
+              </div>
+              <div className="max-h-28 overflow-y-auto">
+                {paletteSongResults.map(song => (
+                  <div
+                    key={song._id}
+                    draggable
+                    onDragStart={e => handleDragStart(e, {
+                      source: 'palette',
+                      element: {
+                        type: 'song',
+                        song: song._id,
+                        label: `${song.title} — ${song.artistDisplay || ''}`,
+                        duration: song.duration,
+                      },
+                    })}
+                    className="flex items-center gap-1.5 py-1 px-1 rounded cursor-grab hover:bg-base-200 text-xs"
+                    title="Drag to add specific song"
+                  >
+                    <Music className="w-3 h-3 text-base-content/50 shrink-0" />
+                    <span className="truncate flex-1">{song.title}</span>
+                    <span className="text-[10px] text-base-content/30 truncate max-w-16">{song.artistDisplay || ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border border-base-300 rounded-lg p-2 bg-base-100">
+              <div className="text-[10px] font-semibold text-base-content/40 mb-1">Presets</div>
+              <div className="grid grid-cols-3 gap-1">
+                {PRESET_ITEMS.map(preset => {
+                  const Icon = preset.icon;
+                  return (
+                    <div
+                      key={preset.type}
+                      draggable
+                      onDragStart={e => handleDragStart(e, {
+                        source: 'palette',
+                        element: { type: preset.type, label: preset.label },
+                      })}
+                      className="flex flex-col items-center justify-center gap-1 p-2 rounded cursor-grab hover:bg-base-200 border border-base-300/50"
+                    >
+                      <Icon className="w-4 h-4 text-base-content/60" />
+                      <span className="text-[10px] text-center leading-tight">{preset.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Element List */}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-base-content/60 uppercase tracking-wide">Clock Elements</h2>
             <button className="btn btn-primary btn-xs" onClick={() => setShowAddElement(true)}>
@@ -146,80 +364,103 @@ export default function ClockEditorPage() {
           </div>
 
           {(clock.elements || []).length === 0 ? (
-            <div className="text-center py-12 bg-base-200 rounded-lg">
-              <p className="text-base-content/40 text-sm">No elements yet. Add categories, imaging, and other elements to build your clock.</p>
+            <div
+              className="flex-1 text-center bg-base-200 rounded-lg flex flex-col items-center justify-center"
+              onDragOver={handleContainerDragOver}
+              onDrop={handleListDrop}
+            >
+              <p className="text-base-content/40 text-sm">Drag categories, songs, or presets here from the palette.</p>
+              {dropIndex === 0 && <div className="h-0.5 w-32 bg-primary my-2" />}
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1"
+              onDragOver={handleContainerDragOver}
+              onDrop={handleListDrop}
+              onDragLeave={() => setDropIndex(null)}
+            >
               {clock.elements.sort((a, b) => a.position - b.position).map((el, index) => {
                 const Icon = ELEMENT_ICONS[el.type] || Music;
                 const typeInfo = CLOCK_ELEMENT_TYPES[el.type] || { label: el.type, color: 'bg-gray-500' };
                 const cat = el.category ? categoryList.find(c => c._id === (el.category._id || el.category)) : null;
 
                 return (
-                  <div key={el._id || index} className="flex items-center gap-2 p-2 rounded-lg bg-base-200 hover:bg-base-300/50 group">
-                    <span className="text-xs font-mono text-base-content/30 w-5 text-right">{index + 1}</span>
-                    <div className="flex flex-col gap-0.5">
-                      <button className="btn btn-ghost btn-xs px-0 h-3 min-h-0" onClick={() => moveElement(index, -1)} disabled={index === 0}>
-                        <span className="text-[10px]">&#9650;</span>
-                      </button>
-                      <button className="btn btn-ghost btn-xs px-0 h-3 min-h-0" onClick={() => moveElement(index, 1)} disabled={index === clock.elements.length - 1}>
-                        <span className="text-[10px]">&#9660;</span>
-                      </button>
-                    </div>
-                    <div className={`w-6 h-6 rounded flex items-center justify-center text-white ${typeInfo.color}`}>
-                      <Icon className="w-3 h-3" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {el.label || cat?.name || typeInfo.label}
-                        </span>
-                        {cat && (
-                          <span className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: cat.color, color: 'white' }}>
-                            {cat.code}
-                          </span>
-                        )}
-                        <span className="badge badge-xs badge-outline">{typeInfo.label}</span>
+                  <div key={el._id || index}>
+                    {dropIndex === index && <div className="h-0.5 bg-primary my-0.5" />}
+                    <div
+                      className="flex items-center gap-2 p-2 rounded-lg bg-base-200 hover:bg-base-300/50 group"
+                      onDragOver={e => handleListDragOver(e, index)}
+                    >
+                      <span className="text-xs font-mono text-base-content/30 w-5 text-right">{index + 1}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <button className="btn btn-ghost btn-xs px-0 h-3 min-h-0" onClick={() => moveElement(index, -1)} disabled={index === 0}>
+                          <span className="text-[10px]">&#9650;</span>
+                        </button>
+                        <button className="btn btn-ghost btn-xs px-0 h-3 min-h-0" onClick={() => moveElement(index, 1)} disabled={index === clock.elements.length - 1}>
+                          <span className="text-[10px]">&#9660;</span>
+                        </button>
                       </div>
-                    </div>
-                    <input
-                      className="input input-bordered input-xs w-20 text-right font-mono"
-                      value={formatDuration(el.estimatedDuration)}
-                      onChange={e => updateElement(index, 'estimatedDuration', parseDuration(e.target.value))}
-                      placeholder="0:00"
-                      title="Estimated duration"
-                    />
-                    {clock.flowType === 'natural-flow' && (
-                      <label className="flex items-center gap-1 cursor-pointer" title={el.isPinned ? 'Pinned (fixed)' : 'Unpinned (floats)'}>
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-xs"
-                          checked={el.isPinned}
-                          onChange={e => updateElement(index, 'isPinned', e.target.checked)}
-                        />
-                        <span className="text-xs text-base-content/40">Pin</span>
-                      </label>
-                    )}
-                    <button className="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100"
-                      onClick={() => removeElement(index)}>
-                      <Trash2 className="w-3 h-3" />
+                      <div
+                        draggable
+                        onDragStart={e => handleDragStart(e, { source: 'reorder', index })}
+                        className="cursor-grab p-1"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="w-4 h-4 text-base-content/30" />
+                      </div>
+                      <div className={`w-6 h-6 rounded flex items-center justify-center text-white ${typeInfo.color}`}>
+                        <Icon className="w-3 h-3" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">
+                            {el.label || cat?.name || typeInfo.label}
+                          </span>
+                          {cat && (
+                            <span className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: cat.color, color: 'white' }}>
+                              {cat.code}
+                            </span>
+                          )}
+                          <span className="badge badge-xs badge-outline">{typeInfo.label}</span>
+                        </div>
+                      </div>
+                      <input
+                        className="input input-bordered input-xs w-20 text-right font-mono"
+                        value={formatDuration(el.estimatedDuration)}
+                        onChange={e => updateElement(index, 'estimatedDuration', parseDuration(e.target.value))}
+                        placeholder="0:00"
+                        title="Estimated duration"
+                      />
+                      {clock.flowType === 'natural-flow' && (
+                        <label className="flex items-center gap-1 cursor-pointer" title={el.isPinned ? 'Pinned (fixed)' : 'Unpinned (floats)'}>
+                          <input
+                            type="checkbox"
+                            className="checkbox checkbox-xs"
+                            checked={el.isPinned}
+                            onChange={e => updateElement(index, 'isPinned', e.target.checked)}
+                          />
+                          <span className="text-xs text-base-content/40">Pin</span>
+                        </label>
+                      )}
+                      <button className="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100"
+                        onClick={() => removeElement(index)}>
+                        <Trash2 className="w-3 h-3" />
                     </button>
+                    </div>
                   </div>
                 );
               })}
+              {dropIndex === clock.elements.length && <div className="h-0.5 bg-primary my-0.5" />}
             </div>
           )}
         </div>
 
-        {/* Clock Pie View (simplified visual) */}
-        <div className="w-72 shrink-0">
+        {/* Clock Pie View */}
+        <div className="w-72 shrink-0 overflow-y-auto">
           <h2 className="text-sm font-semibold text-base-content/60 uppercase tracking-wide mb-3">Clock View</h2>
           <div className="bg-base-200 rounded-lg p-4">
             <div className="relative w-56 h-56 mx-auto">
               <svg viewBox="0 0 200 200" className="w-full h-full">
                 <circle cx="100" cy="100" r="95" fill="none" stroke="oklch(var(--b3))" strokeWidth="2" />
-                {/* Hour markers */}
                 {Array.from({ length: 12 }).map((_, i) => {
                   const angle = (i * 30 - 90) * Math.PI / 180;
                   const x1 = 100 + 88 * Math.cos(angle);
@@ -228,16 +469,14 @@ export default function ClockEditorPage() {
                   const y2 = 100 + 95 * Math.sin(angle);
                   return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="oklch(var(--bc))" strokeWidth="1" opacity="0.3" />;
                 })}
-                {/* Element segments */}
                 {(() => {
                   const elements = clock.elements || [];
-                  const total = totalDuration || (elements.length * 240000); // fallback: 4 min each
+                  const total = totalDuration || (elements.length * 240000);
                   let startAngle = -90;
                   return elements.map((el, i) => {
                     const duration = el.estimatedDuration || (total / elements.length);
                     const sweep = (duration / total) * 360;
                     const cat = el.category ? categoryList.find(c => c._id === (el.category._id || el.category)) : null;
-                    const color = cat?.color || CLOCK_ELEMENT_TYPES[el.type]?.color?.replace('bg-', '') || '#666';
 
                     const startRad = startAngle * Math.PI / 180;
                     const endRad = (startAngle + sweep) * Math.PI / 180;
@@ -288,7 +527,7 @@ export default function ClockEditorPage() {
       {/* Add Element Modal */}
       {showAddElement && (
         <div className="modal modal-open">
-          <div className="modal-box">
+          <div className="modal-box max-w-md">
             <h3 className="font-bold text-lg">Add Element</h3>
             <div className="grid grid-cols-2 gap-3 mt-4">
               <div className="form-control col-span-2">
