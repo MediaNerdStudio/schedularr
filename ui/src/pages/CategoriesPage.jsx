@@ -221,7 +221,15 @@ export default function CategoriesPage() {
 
     const rect = e.currentTarget.getBoundingClientRect();
     const midpoint = rect.top + rect.height / 2;
-    const position = e.clientY > midpoint ? 'after' : 'before';
+    const offset = e.clientY - midpoint;
+    let position;
+    if (Math.abs(offset) <= 4) {
+      // deadzone: keep current position if already on this node
+      position = dropTarget?.id === targetNode._id ? dropTarget.position : 'before';
+    } else {
+      position = offset > 0 ? 'after' : 'before';
+    }
+    if (dropTarget?.id === targetNode._id && dropTarget.position === position) return;
     setDropTarget({ id: targetNode._id, position });
   };
 
