@@ -3,8 +3,12 @@
   themes: light --default, dark --prefersdark;
 }
 
+@import "ag-grid-community/styles/ag-grid.css";
+@import "ag-grid-community/styles/ag-theme-alpine.css";
+
 /* AG Grid theme overrides */
-.ag-theme-alpine {
+.ag-theme-alpine,
+.ag-theme-alpine-dark {
   --ag-header-background-color: oklch(var(--b2));
   --ag-background-color: oklch(var(--b1));
   --ag-odd-row-background-color: oklch(var(--b2) / 0.5);
@@ -15,7 +19,17 @@
   --ag-border-color: oklch(var(--b3));
   --ag-row-border-color: oklch(var(--b3) / 0.5);
   --ag-font-family: inherit;
-  --ag-font-size: 13px;
+  --ag-font-size: 12px;
+}
+
+.compact-grid .ag-cell {
+  padding: 0 6px;
+}
+.compact-grid .ag-header-cell {
+  padding: 0 6px;
+}
+.compact-grid .ag-cell-wrapper {
+  align-items: center;
 }
 
 /* Scrollbar styling */

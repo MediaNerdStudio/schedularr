@@ -1,14 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AgGridReact } from 'ag-grid-react';
-import { AllCommunityModule } from 'ag-grid-community';
 import { Music, Plus, Search, Filter, Download, Upload } from 'lucide-react';
+import CompactGrid from '../components/CompactGrid';
 import { songs, categories, artists } from '../lib/api';
 import { formatDuration, ROTATION_LABELS } from '../lib/utils';
 
 export default function LibraryPage() {
   const navigate = useNavigate();
-  const gridRef = useRef(null);
   const [songList, setSongList] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -50,25 +48,27 @@ export default function LibraryPage() {
   const columnDefs = [
     {
       headerName: '',
+      colId: 'artwork',
       field: 'artwork',
-      width: 50,
+      width: 46,
       cellRenderer: (params) => {
         const img = params.value || params.data?.images?.[0]?.url;
         return img
-          ? <img src={img} className="w-8 h-8 rounded object-cover" alt="" />
-          : <div className="w-8 h-8 rounded bg-base-300 flex items-center justify-center"><Music className="w-4 h-4 text-base-content/30" /></div>;
+          ? <img src={img} className="w-6 h-6 rounded object-cover" alt="" />
+          : <div className="w-6 h-6 rounded bg-base-300 flex items-center justify-center"><Music className="w-3 h-3 text-base-content/30" /></div>;
       },
       sortable: false,
       filter: false,
     },
-    { headerName: 'Title', field: 'title', flex: 2, minWidth: 200 },
     {
       headerName: 'Artist',
+      colId: 'artist',
       field: 'artistDisplay',
       flex: 1.5,
       minWidth: 150,
       valueGetter: (params) => params.data?.artistDisplay || params.data?.primaryArtist?.name || '',
     },
+    { headerName: 'Title', colId: 'title', field: 'title', flex: 2, minWidth: 200 },
     {
       headerName: 'Duration',
       field: 'duration',
@@ -210,25 +210,18 @@ export default function LibraryPage() {
       </div>
 
       {/* AG Grid */}
-      <div className="flex-1 ag-theme-alpine">
-        <AgGridReact
-          ref={gridRef}
-          modules={[AllCommunityModule]}
+      <div className="flex-1 min-h-0">
+        <CompactGrid
           rowData={songList}
           columnDefs={columnDefs}
           defaultColDef={{
             sortable: true,
             resizable: true,
           }}
-          rowHeight={40}
-          headerHeight={36}
-          animateRows={true}
           rowSelection="multiple"
           onRowClicked={handleRowClicked}
-          overlayLoadingTemplate='<span class="loading loading-spinner"></span>'
-          overlayNoRowsTemplate='<span class="text-base-content/40">No songs found</span>'
           loading={loading}
-          getRowId={(params) => params.data._id}
+          noRowsMessage="No songs found"
         />
       </div>
 

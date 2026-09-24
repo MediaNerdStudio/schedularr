@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { AgGridReact } from 'ag-grid-react';
+import { useState, useEffect, useCallback } from 'react';
+import CompactGrid from '../components/CompactGrid';
 import {
   FolderOpen, FolderClosed, Plus, Pencil, Trash2, Music, ChevronRight, ChevronDown,
-  Copy, Move, GripVertical, LayoutGrid, Volume2, FileText, Megaphone, Radio
+  Copy, Move, LayoutGrid, Volume2, FileText, Megaphone, Radio
 } from 'lucide-react';
 import { categories, songs } from '../lib/api';
 import { formatDuration, ROTATION_LABELS, CATEGORY_TYPES } from '../lib/utils';
@@ -26,7 +26,6 @@ export default function CategoriesPage() {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [moveMode, setMoveMode] = useState('move'); // 'move' or 'copy'
   const [dragOverCatId, setDragOverCatId] = useState(null);
-  const gridRef = useRef(null);
 
   const [catForm, setCatForm] = useState({
     code: '', name: '', type: 'music', color: '#3b82f6', rotationLabel: '',
@@ -153,8 +152,8 @@ export default function CategoriesPage() {
   };
 
   // Song selection
-  const onSelectionChanged = useCallback(() => {
-    const rows = gridRef.current?.api?.getSelectedRows() || [];
+  const onSelectionChanged = useCallback((event) => {
+    const rows = event.api.getSelectedRows() || [];
     setSelectedSongIds(rows.map(r => r._id));
   }, []);
 
@@ -197,6 +196,10 @@ export default function CategoriesPage() {
     setShowMoveModal(true);
   };
 
+  const clearSelection = () => {
+    setSelectedSongIds([]);
+  };
+
   const executeBulkAction = async (targetCatId) => {
     try {
       if (moveMode === 'move') {
@@ -205,8 +208,7 @@ export default function CategoriesPage() {
         await categories.bulkCopy(selectedSongIds, targetCatId);
       }
       setShowMoveModal(false);
-      setSelectedSongIds([]);
-      gridRef.current?.api?.deselectAll();
+      clearSelection();
       loadSongs(selectedCat?._id);
       loadCategories();
     } catch (err) {
@@ -219,8 +221,7 @@ export default function CategoriesPage() {
     if (!confirm(`Remove ${selectedSongIds.length} songs from "${selectedCat.name}"?`)) return;
     try {
       await categories.bulkRemove(selectedSongIds, selectedCat._id);
-      setSelectedSongIds([]);
-      gridRef.current?.api?.deselectAll();
+      clearSelection();
       loadSongs(selectedCat._id);
       loadCategories();
     } catch (err) {
@@ -231,26 +232,26 @@ export default function CategoriesPage() {
   // AG Grid columns
   const columnDefs = [
     {
-      headerName: '', width: 40, checkboxSelection: true, headerCheckboxSelection: true,
-      pinned: 'left', suppressHeaderMenuButton: true, lockPosition: true,
+      headerName: '', colId: 'select', width: 40, checkboxSelection: true, headerCheckboxSelection: true,
+      pinned: 'left', suppressHeaderMenuButton: true, lockPosition: true, sortable: false, filter: false,
     },
-    { headerName: 'Title', field: 'title', flex: 2, minWidth: 200 },
     {
-      headerName: 'Artist', flex: 1.5, minWidth: 150,
+      headerName: 'Artist', colId: 'artist', flex: 1.5, minWidth: 150,
       valueGetter: p => p.data?.artistDisplay || p.data?.primaryArtist?.name || '',
     },
-    { headerName: 'Year', field: 'year', width: 70, type: 'numericColumn' },
+    { headerName: 'Title', colId: 'title', field: 'title', flex: 2, minWidth: 200 },
+    { headerName: 'Year', colId: 'year', field: 'year', width: 70, type: 'numericColumn' },
     {
-      headerName: 'Duration', field: 'duration', width: 80,
+      headerName: 'Duration', colId: 'duration', field: 'duration', width: 80,
       valueFormatter: p => formatDuration(p.value),
     },
-    { headerName: 'BPM', field: 'bpm', width: 60, type: 'numericColumn' },
+    { headerName: 'BPM', colId: 'bpm', field: 'bpm', width: 60, type: 'numericColumn' },
     {
-      headerName: 'Labels', width: 120,
+      headerName: 'Labels', colId: 'labels', width: 120,
       valueGetter: p => (p.data?.rotationLabels || []).map(l => ROTATION_LABELS[l]?.label || l).join(', '),
     },
     {
-      headerName: 'Spotify', width: 70,
+      headerName: 'Spotify', colId: 'spotify', width: 70,
       valueGetter: p => p.data?.externalIds?.spotifyTrackId ? 'Yes' : '',
       cellClass: p => p.value ? 'text-green-500' : 'text-base-content/20',
     },
@@ -389,22 +390,6 @@ export default function CategoriesPage() {
                 </h3>
                 <p className="text-xs text-base-content/40">{songTotal} songs{selectedCat.description ? ` — ${selectedCat.description}` : ''}</p>
               </div>
-
-              {/* Bulk actions */}
-              {selectedSongIds.length > 0 && (
-                <div className="flex gap-1 items-center">
-                  <span className="text-xs text-base-content/50 mr-1">{selectedSongIds.length} selected</span>
-                  <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('move')} title="Move to...">
-                    <Move className="w-3.5 h-3.5" /> Move
-                  </button>
-                  <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('copy')} title="Copy to...">
-                    <Copy className="w-3.5 h-3.5" /> Copy
-                  </button>
-                  <button className="btn btn-sm btn-ghost gap-1 text-error" onClick={handleBulkRemove} title="Remove from category">
-                    <Trash2 className="w-3.5 h-3.5" /> Remove
-                  </button>
-                </div>
-              )}
             </>
           ) : (
             <div className="flex-1 text-center text-sm text-base-content/30 py-2">
@@ -414,29 +399,38 @@ export default function CategoriesPage() {
         </div>
 
         {/* AG Grid */}
-        <div className="flex-1 ag-theme-alpine" data-theme="">
+        <div className="flex-1 min-h-0">
           {selectedCat ? (
             loadingSongs ? (
               <div className="flex items-center justify-center h-full">
                 <span className="loading loading-spinner loading-lg" />
               </div>
             ) : (
-              <AgGridReact
-                ref={gridRef}
+              <CompactGrid
                 rowData={catSongs}
                 columnDefs={columnDefs}
                 defaultColDef={defaultColDef}
                 rowSelection="multiple"
                 onSelectionChanged={onSelectionChanged}
                 getRowId={p => p.data._id}
-                rowDragManaged={true}
-                animateRows={true}
                 suppressRowClickSelection={true}
-                rowHeight={32}
-                headerHeight={36}
-                onRowDragEnd={(e) => {
-                  // Could be used for rotation order sorting within category
-                }}
+                noRowsMessage="No songs in this category"
+                additionalActions={
+                  selectedSongIds.length > 0 && (
+                    <div className="flex gap-1 items-center">
+                      <span className="text-xs text-base-content/50">{selectedSongIds.length} selected</span>
+                      <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('move')} title="Move to...">
+                        <Move className="w-3.5 h-3.5" /> Move
+                      </button>
+                      <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('copy')} title="Copy to...">
+                        <Copy className="w-3.5 h-3.5" /> Copy
+                      </button>
+                      <button className="btn btn-sm btn-ghost gap-1 text-error" onClick={handleBulkRemove} title="Remove from category">
+                        <Trash2 className="w-3.5 h-3.5" /> Remove
+                      </button>
+                    </div>
+                  )
+                }
               />
             )
           ) : (
