@@ -126,13 +126,17 @@ export default function ClockEditorPage() {
     const position = elements.length;
     const cat = categoryList.find(c => c._id === newElement.category);
     const songLabel = selectedSong ? `${selectedSong.title} — ${selectedSong.artistDisplay || selectedSong.primaryArtist?.name || ''}` : '';
+    const isCategoryElement = ['fixed', 'migrating', 'imaging'].includes(newElement.type);
+    const estimatedDuration =
+      newElement.type === 'song' ? (selectedSong?.duration || 0) :
+      isCategoryElement ? (cat?.averageDuration || 0) : 0;
     elements.push({
       type: newElement.type,
       position,
       category: newElement.category || undefined,
       song: newElement.song || undefined,
       label: newElement.label || (newElement.type === 'song' ? songLabel : cat?.name) || CLOCK_ELEMENT_TYPES[newElement.type]?.label || '',
-      estimatedDuration: newElement.type === 'song' ? (selectedSong?.duration || 0) : 0,
+      estimatedDuration,
       isPinned: true,
       text: '',
     });
@@ -178,7 +182,7 @@ export default function ClockEditorPage() {
         type,
         category: payload.category,
         label: payload.label || cat?.name || '',
-        estimatedDuration: 0,
+        estimatedDuration: cat?.averageDuration || 0,
         isPinned: true,
         text: '',
       };
@@ -227,8 +231,18 @@ export default function ClockEditorPage() {
   const handleListDragOver = (e, index) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
-    const mid = rect.top + rect.height / 2;
-    setDropIndex(index + (e.clientY > mid ? 1 : 0));
+    const offset = e.clientY - (rect.top + rect.height / 2);
+    let next = dropIndex;
+    const dead = 4;
+    if (Math.abs(offset) <= dead) {
+      // deadzone: keep existing target if it belongs to this row
+      if (dropIndex !== index && dropIndex !== index + 1) {
+        next = index;
+      }
+    } else {
+      next = offset > 0 ? index + 1 : index;
+    }
+    if (next !== dropIndex) setDropIndex(next);
   };
 
   const handleListDrop = (e) => {

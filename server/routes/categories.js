@@ -25,11 +25,12 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Get direct song sets for every category
+    // Get direct song sets and duration totals for every category
     const directSets = new Map();
+    const directStats = new Map();
     const songs = await Song.find(
       { 'categoryAssignments.category': { $in: catIds } },
-      { 'categoryAssignments.category': 1 }
+      { duration: 1, 'categoryAssignments.category': 1 }
     ).lean();
 
     for (const song of songs) {
@@ -40,29 +41,46 @@ router.get('/', async (req, res) => {
           const set = directSets.get(cid) || new Set();
           set.add(songId);
           directSets.set(cid, set);
+
+          const stats = directStats.get(cid) || { totalDuration: 0, count: 0 };
+          stats.totalDuration += song.duration || 0;
+          stats.count += 1;
+          directStats.set(cid, stats);
         }
       }
     }
 
     // Recursive union of song IDs (category + all descendants)
     const subtreeSongIds = new Map();
+    const subtreeStats = new Map();
     function collect(cid) {
       if (subtreeSongIds.has(cid)) return subtreeSongIds.get(cid);
       const set = new Set(directSets.get(cid) || []);
+      const stats = { totalDuration: directStats.get(cid)?.totalDuration || 0, count: directStats.get(cid)?.count || 0 };
       for (const childId of (childrenMap.get(cid) || [])) {
         const childSet = collect(childId);
         for (const id of childSet) set.add(id);
+        const childStats = subtreeStats.get(childId);
+        if (childStats) {
+          stats.totalDuration += childStats.totalDuration;
+          stats.count += childStats.count;
+        }
       }
       subtreeSongIds.set(cid, set);
+      subtreeStats.set(cid, stats);
       return set;
     }
 
     for (const cid of catIds) collect(cid);
 
-    const result = categories.map(cat => ({
-      ...cat.toObject(),
-      songCount: subtreeSongIds.get(cat._id.toString())?.size || 0,
-    }));
+    const result = categories.map(cat => {
+      const stats = subtreeStats.get(cat._id.toString()) || { count: 0, totalDuration: 0 };
+      return {
+        ...cat.toObject(),
+        songCount: stats.count,
+        averageDuration: stats.count ? Math.round(stats.totalDuration / stats.count) : 0,
+      };
+    });
 
     res.json(result);
   } catch (err) {
