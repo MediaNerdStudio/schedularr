@@ -32,7 +32,7 @@ export default function CategoriesPage() {
 
   // Drag-reorder
   const [draggingId, setDraggingId] = useState(null);
-  const [dropTarget, setDropTarget] = useState(null); // { id, position: 'before'|'after' }
+  const [dropTargetId, setDropTargetId] = useState(null);
 
   const [catForm, setCatForm] = useState({
     code: '', name: '', type: 'music', color: '#3b82f6', rotationLabel: '',
@@ -209,42 +209,33 @@ export default function CategoriesPage() {
     setDraggingId(node._id);
   };
 
-  const handleCatDragOver = (e, targetNode) => {
+  const handleCatDragEnter = (e, targetNode) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!draggingId || draggingId === targetNode._id) {
-      setDropTarget(null);
-      return;
-    }
+    if (!draggingId || draggingId === targetNode._id) return;
     const dragged = catList.find(c => c._id === draggingId);
     if (!dragged || dragged.parent !== targetNode.parent) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const midpoint = rect.top + rect.height / 2;
-    const offset = e.clientY - midpoint;
-    let position;
-    if (Math.abs(offset) <= 4) {
-      // deadzone: keep current position if already on this node
-      position = dropTarget?.id === targetNode._id ? dropTarget.position : 'before';
-    } else {
-      position = offset > 0 ? 'after' : 'before';
-    }
-    if (dropTarget?.id === targetNode._id && dropTarget.position === position) return;
-    setDropTarget({ id: targetNode._id, position });
+    setDropTargetId(targetNode._id);
   };
 
-  const handleCatDragLeave = () => setDropTarget(null);
+  const handleCatDragLeave = (e, targetNode) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    if (dropTargetId === targetNode._id) setDropTargetId(null);
+  };
 
   const handleCatDrop = async (e, targetNode) => {
     e.preventDefault();
     e.stopPropagation();
-    setDropTarget(null);
+    setDropTargetId(null);
     const draggedId = draggingId;
     setDraggingId(null);
     if (!draggedId || draggedId === targetNode._id) return;
 
     const dragged = catList.find(c => c._id === draggedId);
     if (!dragged || dragged.parent !== targetNode.parent) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
 
     const parentId = targetNode.parent;
     const siblings = catList
@@ -254,7 +245,7 @@ export default function CategoriesPage() {
     const targetIndex = siblings.findIndex(c => c._id === targetNode._id);
     if (targetIndex < 0) return;
 
-    const insertIndex = dropTarget?.position === 'after' ? targetIndex + 1 : targetIndex;
+    const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
     siblings.splice(insertIndex, 0, dragged);
 
     const items = siblings.map((c, i) => ({ id: c._id, sortOrder: i, parent: c.parent }));
@@ -348,28 +339,27 @@ export default function CategoriesPage() {
     const isSelected = selectedCat?._id === node._id;
     const isDragOver = dragOverCatId === node._id;
     const isDragging = draggingId === node._id;
-    const isDropBefore = dropTarget?.id === node._id && dropTarget?.position === 'before';
-    const isDropAfter = dropTarget?.id === node._id && dropTarget?.position === 'after';
+    const isDropTarget = dropTargetId === node._id;
     const Icon = TYPE_ICONS[node.type] || Music;
     const isRoot = !node.parent;
 
     return (
       <div key={node._id}>
-        {isDropBefore && <div className="h-0.5 bg-primary my-0.5" />}
         <div
           className={`flex items-center gap-1.5 py-1 px-2 rounded cursor-pointer transition-colors text-sm select-none
             ${isSelected ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-base-300/50'}
             ${isDragOver ? 'bg-primary/25 outline outline-1 outline-primary' : ''}
             ${isDragging ? 'opacity-40' : ''}
+            ${isDropTarget ? 'ring-1 ring-primary bg-primary/10' : ''}
           `}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => setSelectedCat(node)}
           onContextMenu={e => handleContextMenu(e, node)}
           draggable
           onDragStart={e => handleCatDragStart(e, node)}
-          onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
-          onDragOver={e => handleCatDragOver(e, node)}
-          onDragLeave={handleCatDragLeave}
+          onDragEnd={() => { setDraggingId(null); setDropTargetId(null); }}
+          onDragEnter={e => handleCatDragEnter(e, node)}
+          onDragLeave={e => handleCatDragLeave(e, node)}
           onDrop={e => handleCatDrop(e, node)}
           onDragOverCapture={e => handleTreeDragOver(e, node._id)}
           onDragLeaveCapture={() => setDragOverCatId(null)}
@@ -402,14 +392,7 @@ export default function CategoriesPage() {
 
           <span className="truncate flex-1">{node.name}</span>
           <span className="text-xs text-base-content/30 tabular-nums">{node.songCount || 0}</span>
-
-          {node.rotationLabel && (
-            <span className="text-[10px] px-1 rounded bg-base-300 text-base-content/70">
-              {ROTATION_LABELS[node.rotationLabel]?.label}
-            </span>
-          )}
         </div>
-        {isDropAfter && <div className="h-0.5 bg-primary my-0.5" />}
 
         {hasChildren && isExpanded && (
           <div>
