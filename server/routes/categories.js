@@ -48,17 +48,24 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Bulk move songs to a target category (removes from source, adds to target)
+// Bulk move songs to a target category
+// mode: 'move' removes from sourceCategoryId only, 'exclusive' removes all other categories
 router.post('/bulk-move', async (req, res) => {
   try {
-    const { songIds, sourceCategoryId, targetCategoryId } = req.body;
+    const { songIds, sourceCategoryId, targetCategoryId, mode = 'move' } = req.body;
     if (!songIds?.length || !targetCategoryId) {
       return res.status(400).json({ error: 'songIds and targetCategoryId are required' });
     }
     const targetCat = await Category.findById(targetCategoryId);
     if (!targetCat) return res.status(404).json({ error: 'Target category not found' });
 
-    if (sourceCategoryId) {
+    if (mode === 'exclusive') {
+      // Remove every assignment except the target category, then add target if missing
+      await Song.updateMany(
+        { _id: { $in: songIds } },
+        { $pull: { categoryAssignments: { category: { $ne: targetCategoryId } } } }
+      );
+    } else if (sourceCategoryId) {
       await Song.updateMany(
         { _id: { $in: songIds } },
         { $pull: { categoryAssignments: { category: sourceCategoryId } } }
@@ -72,7 +79,7 @@ router.post('/bulk-move', async (req, res) => {
       },
     }));
     const result = await Song.bulkWrite(bulkOps);
-    res.json({ moved: result.modifiedCount, total: songIds.length });
+    res.json({ moved: result.modifiedCount, total: songIds.length, mode });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

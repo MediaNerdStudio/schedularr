@@ -43,8 +43,8 @@ export const categories = {
   delete: (id) => api.delete(`/categories/${id}`).then(r => r.data),
   addSong: (id, songId, folderId) => api.post(`/categories/${id}/songs`, { songId, folderId }).then(r => r.data),
   removeSong: (id, songId) => api.delete(`/categories/${id}/songs/${songId}`).then(r => r.data),
-  bulkMove: (songIds, sourceCategoryId, targetCategoryId) =>
-    api.post('/categories/bulk-move', { songIds, sourceCategoryId, targetCategoryId }).then(r => r.data),
+  bulkMove: (songIds, sourceCategoryId, targetCategoryId, mode = 'move') =>
+    api.post('/categories/bulk-move', { songIds, sourceCategoryId, targetCategoryId, mode }).then(r => r.data),
   bulkCopy: (songIds, targetCategoryId) =>
     api.post('/categories/bulk-copy', { songIds, targetCategoryId }).then(r => r.data),
   bulkRemove: (songIds, categoryId) =>

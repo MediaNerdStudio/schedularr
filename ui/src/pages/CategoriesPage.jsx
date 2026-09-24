@@ -24,7 +24,7 @@ export default function CategoriesPage() {
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
-  const [moveMode, setMoveMode] = useState('move');
+
   const [dragOverCatId, setDragOverCatId] = useState(null);
 
   // Context menu
@@ -256,18 +256,19 @@ export default function CategoriesPage() {
   };
 
   // Bulk song actions
-  const openBulkMove = (mode) => {
+  const openBulkMove = () => {
     if (selectedSongIds.length === 0) return;
-    setMoveMode(mode);
     setShowMoveModal(true);
   };
 
   const clearSelection = () => setSelectedSongIds([]);
 
-  const executeBulkAction = async (targetCatId) => {
+  const executeBulkAction = async (targetCatId, action) => {
     try {
-      if (moveMode === 'move') {
-        await categories.bulkMove(selectedSongIds, selectedCat?._id, targetCatId);
+      if (action === 'move') {
+        await categories.bulkMove(selectedSongIds, selectedCat?._id, targetCatId, 'move');
+      } else if (action === 'exclusive') {
+        await categories.bulkMove(selectedSongIds, selectedCat?._id, targetCatId, 'exclusive');
       } else {
         await categories.bulkCopy(selectedSongIds, targetCatId);
       }
@@ -496,11 +497,8 @@ export default function CategoriesPage() {
                   selectedSongIds.length > 0 && (
                     <div className="flex gap-1 items-center">
                       <span className="text-xs text-base-content/50">{selectedSongIds.length} selected</span>
-                      <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('move')} title="Move to...">
-                        <Move className="w-3.5 h-3.5" /> Move
-                      </button>
-                      <button className="btn btn-sm btn-ghost gap-1" onClick={() => openBulkMove('copy')} title="Copy to...">
-                        <Copy className="w-3.5 h-3.5" /> Copy
+                      <button className="btn btn-sm btn-ghost gap-1" onClick={openBulkMove} title="Move / Copy to...">
+                        <Move className="w-3.5 h-3.5" /> Move / Copy
                       </button>
                       <button className="btn btn-sm btn-ghost gap-1 text-error" onClick={handleBulkRemove} title="Remove from category">
                         <Trash2 className="w-3.5 h-3.5" /> Remove
@@ -641,8 +639,8 @@ export default function CategoriesPage() {
       {/* Move/Copy Modal */}
       {showMoveModal && (
         <div className="modal modal-open">
-          <div className="modal-box max-w-sm">
-            <h3 className="font-bold text-lg">{moveMode === 'move' ? 'Move' : 'Copy'} {selectedSongIds.length} songs to...</h3>
+          <div className="modal-box max-w-md">
+            <h3 className="font-bold text-lg">Move / Copy {selectedSongIds.length} songs to...</h3>
             <div className="mt-4 max-h-80 overflow-y-auto border border-base-300 rounded-lg p-1">
               {(() => {
                 const renderModalTree = (nodes, depth = 0) => nodes.map(node => {
@@ -651,13 +649,11 @@ export default function CategoriesPage() {
                   const Icon = TYPE_ICONS[node.type] || Music;
                   return (
                     <div key={node._id}>
-                      <button
-                        className={`flex items-center gap-1.5 w-full py-1 px-2 rounded text-left text-sm
-                          ${isCurrent ? 'opacity-40 cursor-not-allowed' : 'hover:bg-base-200'}
+                      <div
+                        className={`flex items-center gap-1.5 w-full py-1 px-2 rounded text-sm
+                          ${isCurrent ? 'opacity-40' : 'hover:bg-base-200'}
                         `}
                         style={{ paddingLeft: `${depth * 16 + 8}px` }}
-                        disabled={isCurrent}
-                        onClick={() => !isCurrent && executeBulkAction(node._id)}
                       >
                         <span className="w-3" />
                         <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: effectiveColor(node) }}>
@@ -669,7 +665,20 @@ export default function CategoriesPage() {
                         <span className="truncate flex-1">{node.name}</span>
                         <span className="font-mono text-[10px] text-base-content/30">{node.code}</span>
                         <span className="text-xs text-base-content/30 tabular-nums ml-1">{node.songCount || 0}</span>
-                      </button>
+                        {!isCurrent && (
+                          <div className="flex items-center gap-0.5 ml-1">
+                            <button className="btn btn-xs btn-ghost px-1.5" title="Move (keep other category copies)" onClick={() => executeBulkAction(node._id, 'move')}>
+                              Move
+                            </button>
+                            <button className="btn btn-xs btn-ghost px-1.5 text-warning" title="Move exclusively (remove all other copies)" onClick={() => executeBulkAction(node._id, 'exclusive')}>
+                              Excl.
+                            </button>
+                            <button className="btn btn-xs btn-ghost px-1.5" title="Copy (leave in all other categories)" onClick={() => executeBulkAction(node._id, 'copy')}>
+                              Copy
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       {hasChildren && renderModalTree(
                         node.children.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
                         depth + 1
