@@ -308,7 +308,7 @@ export default function CategoriesPage() {
       pinned: 'left', suppressHeaderMenuButton: true, lockPosition: true, sortable: false, filter: false,
     },
     {
-      headerName: 'Artist', colId: 'artist', flex: 1.5, minWidth: 150,
+      headerName: 'Artist', colId: 'artist', flex: 1.5, minWidth: 150, sort: 'asc',
       valueGetter: p => p.data?.artistDisplay || p.data?.primaryArtist?.name || '',
     },
     { headerName: 'Title', colId: 'title', field: 'title', flex: 2, minWidth: 200 },
@@ -326,6 +326,22 @@ export default function CategoriesPage() {
       headerName: 'Spotify', colId: 'spotify', width: 70,
       valueGetter: p => p.data?.externalIds?.spotifyTrackId ? 'Yes' : '',
       cellClass: p => p.value ? 'text-green-500' : 'text-base-content/20',
+    },
+    {
+      headerName: 'Spotify ID', colId: 'spotifyId', width: 120, hide: true,
+      valueGetter: p => p.data?.externalIds?.spotifyTrackId || '', cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'ISRC', colId: 'isrc', width: 120, hide: true,
+      valueGetter: p => p.data?.externalIds?.isrc || '', cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'Omni TitleId', colId: 'omniTitleId', width: 120, hide: true,
+      valueGetter: p => p.data?.externalIds?.omniTitleId || '', cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'Omni ItemCode', colId: 'omniItemCode', width: 120, hide: true,
+      valueGetter: p => p.data?.externalIds?.omniItemCode || '', cellClass: 'font-mono text-[10px]',
     },
   ];
 

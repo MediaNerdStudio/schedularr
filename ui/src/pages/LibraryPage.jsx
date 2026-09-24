@@ -47,39 +47,28 @@ export default function LibraryPage() {
 
   const columnDefs = [
     {
-      headerName: '',
-      colId: 'artwork',
-      field: 'artwork',
-      width: 46,
-      cellRenderer: (params) => {
-        const img = params.value || params.data?.images?.[0]?.url;
-        return img
-          ? <img src={img} className="w-6 h-6 rounded object-cover" alt="" />
-          : <div className="w-6 h-6 rounded bg-base-300 flex items-center justify-center"><Music className="w-3 h-3 text-base-content/30" /></div>;
-      },
-      sortable: false,
-      filter: false,
-    },
-    {
       headerName: 'Artist',
       colId: 'artist',
       field: 'artistDisplay',
       flex: 1.5,
       minWidth: 150,
+      sort: 'asc',
       valueGetter: (params) => params.data?.artistDisplay || params.data?.primaryArtist?.name || '',
     },
     { headerName: 'Title', colId: 'title', field: 'title', flex: 2, minWidth: 200 },
     {
       headerName: 'Duration',
+      colId: 'duration',
       field: 'duration',
       width: 90,
       valueFormatter: (params) => formatDuration(params.value),
     },
-    { headerName: 'BPM', field: 'bpm', width: 70 },
-    { headerName: 'Genre', field: 'genre', width: 120 },
-    { headerName: 'Year', field: 'year', width: 70 },
+    { headerName: 'BPM', colId: 'bpm', field: 'bpm', width: 70 },
+    { headerName: 'Genre', colId: 'genre', field: 'genre', width: 120 },
+    { headerName: 'Year', colId: 'year', field: 'year', width: 70 },
     {
       headerName: 'Categories',
+      colId: 'categories',
       field: 'categoryAssignments',
       flex: 1,
       cellRenderer: (params) => {
@@ -102,8 +91,9 @@ export default function LibraryPage() {
     },
     {
       headerName: 'Rotation',
+      colId: 'rotation',
       field: 'rotationLabels',
-      width: 130,
+      width: 110,
       cellRenderer: (params) => {
         const labels = params.value || [];
         return (
@@ -119,10 +109,38 @@ export default function LibraryPage() {
       },
       sortable: false,
     },
+    { headerName: 'Weight', colId: 'weight', field: 'weight', width: 70 },
     {
-      headerName: 'Weight',
-      field: 'weight',
-      width: 70,
+      headerName: 'Spotify ID',
+      colId: 'spotifyId',
+      width: 120,
+      hide: true,
+      valueGetter: p => p.data?.externalIds?.spotifyTrackId || '',
+      cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'ISRC',
+      colId: 'isrc',
+      width: 120,
+      hide: true,
+      valueGetter: p => p.data?.externalIds?.isrc || '',
+      cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'Omni TitleId',
+      colId: 'omniTitleId',
+      width: 120,
+      hide: true,
+      valueGetter: p => p.data?.externalIds?.omniTitleId || '',
+      cellClass: 'font-mono text-[10px]',
+    },
+    {
+      headerName: 'Omni ItemCode',
+      colId: 'omniItemCode',
+      width: 120,
+      hide: true,
+      valueGetter: p => p.data?.externalIds?.omniItemCode || '',
+      cellClass: 'font-mono text-[10px]',
     },
   ];
 
