@@ -12,17 +12,56 @@ router.get('/', async (req, res) => {
     if (req.query.type) filter.type = req.query.type;
     if (req.query.group) filter.group = req.query.group;
     const categories = await Category.find(filter).sort('sortOrder code');
+    const catMap = new Map(categories.map(c => [c._id.toString(), c.toObject()]));
+    const catIds = categories.map(c => c._id.toString());
 
-    // Add song counts
-    const counts = await Song.aggregate([
-      { $unwind: '$categoryAssignments' },
-      { $group: { _id: '$categoryAssignments.category', count: { $sum: 1 } } },
-    ]);
-    const countMap = Object.fromEntries(counts.map(c => [c._id.toString(), c.count]));
+    // Build parent map and tree roots for recursive counting
+    const childrenMap = new Map();
+    for (const c of catMap.values()) {
+      if (c.parent) {
+        const list = childrenMap.get(c.parent.toString()) || [];
+        list.push(c._id.toString());
+        childrenMap.set(c.parent.toString(), list);
+      }
+    }
+
+    // Get direct song sets for every category
+    const directSets = new Map();
+    const songs = await Song.find(
+      { 'categoryAssignments.category': { $in: catIds } },
+      { 'categoryAssignments.category': 1 }
+    ).lean();
+
+    for (const song of songs) {
+      const songId = song._id.toString();
+      for (const ca of (song.categoryAssignments || [])) {
+        const cid = ca.category?.toString();
+        if (catMap.has(cid)) {
+          const set = directSets.get(cid) || new Set();
+          set.add(songId);
+          directSets.set(cid, set);
+        }
+      }
+    }
+
+    // Recursive union of song IDs (category + all descendants)
+    const subtreeSongIds = new Map();
+    function collect(cid) {
+      if (subtreeSongIds.has(cid)) return subtreeSongIds.get(cid);
+      const set = new Set(directSets.get(cid) || []);
+      for (const childId of (childrenMap.get(cid) || [])) {
+        const childSet = collect(childId);
+        for (const id of childSet) set.add(id);
+      }
+      subtreeSongIds.set(cid, set);
+      return set;
+    }
+
+    for (const cid of catIds) collect(cid);
 
     const result = categories.map(cat => ({
       ...cat.toObject(),
-      songCount: countMap[cat._id.toString()] || 0,
+      songCount: subtreeSongIds.get(cat._id.toString())?.size || 0,
     }));
 
     res.json(result);

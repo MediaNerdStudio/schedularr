@@ -467,7 +467,7 @@ export default function CategoriesPage() {
                 <h3 className="font-bold text-sm truncate">{selectedCat.name}
                   <span className="font-mono text-base-content/30 ml-2 font-normal">{selectedCat.code}</span>
                 </h3>
-                <p className="text-xs text-base-content/40">{songTotal} songs{selectedCat.description ? ` — ${selectedCat.description}` : ''}</p>
+                <p className="text-xs text-base-content/40">{selectedCat?.songCount || 0} songs{selectedCat.description ? ` — ${selectedCat.description}` : ''}</p>
               </div>
             </>
           ) : (
