@@ -90,7 +90,7 @@ export default function CategoriesPage() {
     return { roots, parentMap };
   };
 
-  const { tree, parentMap } = buildTree(catList);
+  const { roots: tree, parentMap } = buildTree(catList);
 
   const effectiveColor = (cat) => {
     if (cat.color) return cat.color;
