@@ -24,7 +24,7 @@ const categorySchema = new mongoose.Schema({
   // Rotation label — quick classification
   rotationLabel: {
     type: String,
-    enum: ['', 'hit', 'toth', 'album-track', 'a-rotation', 'b-rotation', 'c-rotation', 'gold', 'recurrent', 'power', 'library'],
+    enum: ['', 'hit', 'toth', 'album-track', 'a-rotation', 'b-rotation', 'c-rotation', 'gold', 'recurrent', 'power', 'library', 'top40', 'tipparade', 'vormgeving'],
     default: '',
   },
 
