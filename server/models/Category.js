@@ -7,7 +7,7 @@ const folderSchema = new mongoose.Schema({
 });
 
 const categorySchema = new mongoose.Schema({
-  code: { type: String, required: true, maxlength: 6, uppercase: true },
+  code: { type: String, required: true, maxlength: 16, uppercase: true },
   name: { type: String, required: true },
   description: { type: String, default: '' },
   type: {
