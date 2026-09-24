@@ -209,13 +209,13 @@ export default function CategoriesPage() {
     setDraggingId(node._id);
   };
 
-  const handleCatDragEnter = (e, targetNode) => {
+  const handleCatDragOver = (e, targetNode) => {
     e.preventDefault();
     e.stopPropagation();
     if (!draggingId || draggingId === targetNode._id) return;
     const dragged = catList.find(c => c._id === draggingId);
     if (!dragged || dragged.parent !== targetNode.parent) return;
-    setDropTargetId(targetNode._id);
+    if (dropTargetId !== targetNode._id) setDropTargetId(targetNode._id);
   };
 
   const handleCatDragLeave = (e, targetNode) => {
@@ -234,21 +234,19 @@ export default function CategoriesPage() {
     const dragged = catList.find(c => c._id === draggedId);
     if (!dragged || dragged.parent !== targetNode.parent) return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const position = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
-
     const parentId = targetNode.parent;
     const siblings = catList
-      .filter(c => c.parent === parentId && c._id !== draggedId)
+      .filter(c => c.parent === parentId)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 
-    const targetIndex = siblings.findIndex(c => c._id === targetNode._id);
+    // Remove dragged and insert before the drop target
+    const withoutDragged = siblings.filter(c => c._id !== draggedId);
+    const targetIndex = withoutDragged.findIndex(c => c._id === targetNode._id);
     if (targetIndex < 0) return;
 
-    const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex;
-    siblings.splice(insertIndex, 0, dragged);
+    withoutDragged.splice(targetIndex, 0, dragged);
 
-    const items = siblings.map((c, i) => ({ id: c._id, sortOrder: i, parent: c.parent }));
+    const items = withoutDragged.map((c, i) => ({ id: c._id, sortOrder: i, parent: c.parent }));
     try {
       await categories.reorder(items);
       loadCategories();
@@ -358,7 +356,7 @@ export default function CategoriesPage() {
           draggable
           onDragStart={e => handleCatDragStart(e, node)}
           onDragEnd={() => { setDraggingId(null); setDropTargetId(null); }}
-          onDragEnter={e => handleCatDragEnter(e, node)}
+          onDragOver={e => handleCatDragOver(e, node)}
           onDragLeave={e => handleCatDragLeave(e, node)}
           onDrop={e => handleCatDrop(e, node)}
           onDragOverCapture={e => handleTreeDragOver(e, node._id)}
