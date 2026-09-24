@@ -643,23 +643,44 @@ export default function CategoriesPage() {
         <div className="modal modal-open">
           <div className="modal-box max-w-sm">
             <h3 className="font-bold text-lg">{moveMode === 'move' ? 'Move' : 'Copy'} {selectedSongIds.length} songs to...</h3>
-            <div className="mt-4 max-h-80 overflow-y-auto space-y-0.5">
-              {catList
-                .filter(c => c._id !== selectedCat?._id)
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(cat => (
-                  <button
-                    key={cat._id}
-                    className="flex items-center gap-2 w-full p-2 rounded hover:bg-base-200 text-left text-sm"
-                    onClick={() => executeBulkAction(cat._id)}
-                  >
-                    <div className="w-4 h-4 rounded" style={{ backgroundColor: effectiveColor(cat) }} />
-                    <span className="font-mono text-xs text-base-content/40 w-14">{cat.code}</span>
-                    <span className="flex-1 truncate">{cat.name}</span>
-                    <span className="text-xs text-base-content/30">{cat.songCount || 0}</span>
-                  </button>
-                ))
-              }
+            <div className="mt-4 max-h-80 overflow-y-auto border border-base-300 rounded-lg p-1">
+              {(() => {
+                const renderModalTree = (nodes, depth = 0) => nodes.map(node => {
+                  const hasChildren = node.children?.length > 0;
+                  const isCurrent = node._id === selectedCat?._id;
+                  const Icon = TYPE_ICONS[node.type] || Music;
+                  return (
+                    <div key={node._id}>
+                      <button
+                        className={`flex items-center gap-1.5 w-full py-1 px-2 rounded text-left text-sm
+                          ${isCurrent ? 'opacity-40 cursor-not-allowed' : 'hover:bg-base-200'}
+                        `}
+                        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+                        disabled={isCurrent}
+                        onClick={() => !isCurrent && executeBulkAction(node._id)}
+                      >
+                        <span className="w-3" />
+                        <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: effectiveColor(node) }}>
+                          {hasChildren
+                            ? <FolderClosed className="w-2.5 h-2.5 text-white" />
+                            : <Icon className="w-2.5 h-2.5 text-white" />
+                          }
+                        </div>
+                        <span className="truncate flex-1">{node.name}</span>
+                        <span className="font-mono text-[10px] text-base-content/30">{node.code}</span>
+                        <span className="text-xs text-base-content/30 tabular-nums ml-1">{node.songCount || 0}</span>
+                      </button>
+                      {hasChildren && renderModalTree(
+                        node.children.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+                        depth + 1
+                      )}
+                    </div>
+                  );
+                });
+                return renderModalTree(
+                  tree.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+                );
+              })()}
             </div>
             <div className="modal-action">
               <button className="btn btn-ghost btn-sm" onClick={() => setShowMoveModal(false)}>Cancel</button>
