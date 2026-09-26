@@ -24,6 +24,7 @@ export default function CategoriesPage() {
   const [showCatModal, setShowCatModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveExpandedIds, setMoveExpandedIds] = useState(new Set());
 
   const [dragOverCatId, setDragOverCatId] = useState(null);
 
@@ -258,7 +259,16 @@ export default function CategoriesPage() {
   // Bulk song actions
   const openBulkMove = () => {
     if (selectedSongIds.length === 0) return;
+    setMoveExpandedIds(new Set());
     setShowMoveModal(true);
+  };
+
+  const toggleMoveExpand = (catId) => {
+    setMoveExpandedIds(previous => {
+      const next = new Set(previous);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
+      return next;
+    });
   };
 
   const clearSelection = () => setSelectedSongIds([]);
@@ -645,6 +655,7 @@ export default function CategoriesPage() {
               {(() => {
                 const renderModalTree = (nodes, depth = 0) => nodes.map(node => {
                   const hasChildren = node.children?.length > 0;
+                  const isExpanded = moveExpandedIds.has(node._id);
                   const isCurrent = node._id === selectedCat?._id;
                   const Icon = TYPE_ICONS[node.type] || Music;
                   return (
@@ -655,10 +666,23 @@ export default function CategoriesPage() {
                         `}
                         style={{ paddingLeft: `${depth * 16 + 8}px` }}
                       >
-                        <span className="w-3" />
+                        <button
+                          className="w-4 h-4 flex items-center justify-center shrink-0"
+                          onClick={() => hasChildren && toggleMoveExpand(node._id)}
+                          disabled={!hasChildren}
+                        >
+                          {hasChildren
+                            ? isExpanded
+                              ? <ChevronDown className="w-3 h-3 text-base-content/40" />
+                              : <ChevronRight className="w-3 h-3 text-base-content/40" />
+                            : <span className="w-3" />
+                          }
+                        </button>
                         <div className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: effectiveColor(node) }}>
                           {hasChildren
-                            ? <FolderClosed className="w-2.5 h-2.5 text-white" />
+                            ? isExpanded
+                              ? <FolderOpen className="w-2.5 h-2.5 text-white" />
+                              : <FolderClosed className="w-2.5 h-2.5 text-white" />
                             : <Icon className="w-2.5 h-2.5 text-white" />
                           }
                         </div>
@@ -679,7 +703,7 @@ export default function CategoriesPage() {
                           </div>
                         )}
                       </div>
-                      {hasChildren && renderModalTree(
+                      {hasChildren && isExpanded && renderModalTree(
                         node.children.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
                         depth + 1
                       )}
