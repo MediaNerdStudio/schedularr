@@ -96,6 +96,9 @@ export default function SchedulePage() {
 
   const scheduledCount = hours.filter(h => h.status === 'scheduled' || h.status === 'edited').length;
   const totalSongs = hours.reduce((s, h) => s + (h.items?.filter(i => i.type === 'song').length || 0), 0);
+  const formatStartTime = value => value
+    ? new Date(value).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    : '--:--:--';
 
   return (
     <div className="p-6">
@@ -242,46 +245,86 @@ export default function SchedulePage() {
                         No items scheduled for this hour.
                       </p>
                     ) : (
-                      <div className="space-y-0.5">
-                        {items.sort((a, b) => a.position - b.position).map((item, i) => (
-                          <div key={item._id || i} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-base-100">
-                            <span className="text-xs font-mono w-4 text-base-content/30">{i + 1}</span>
-                            {item.type === 'song' ? (
-                              <Music className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            ) : item.type === 'imaging' ? (
-                              <Volume2 className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                            ) : (
-                              <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                            )}
-                            <span className="text-sm font-medium flex-1 truncate">{item.title || item.text || item.type}</span>
-                            <span className="text-xs text-base-content/40 truncate max-w-40">{item.artist || ''}</span>
-                            <span className="text-xs font-mono text-base-content/40 w-12 text-right">{formatDuration(item.duration)}</span>
-                            {item.ruleViolations?.length > 0 && (
-                              <div className="dropdown dropdown-end dropdown-hover">
-                                <div tabIndex={0} className="badge badge-xs badge-warning cursor-help gap-0.5">
-                                  {item.ruleViolations.some(v => v.severity === 'unbreakable')
-                                    ? <Shield className="w-2.5 h-2.5" />
-                                    : <AlertTriangle className="w-2.5 h-2.5" />
-                                  }
-                                  {item.ruleViolations.length}
-                                </div>
-                                <div tabIndex={0} className="dropdown-content z-20 shadow bg-base-100 rounded-lg p-2 w-72">
-                                  {item.ruleViolations.map((v, vi) => (
-                                    <div key={vi} className="text-xs py-1 flex gap-2">
-                                      <span className={`badge badge-xs ${v.severity === 'unbreakable' ? 'badge-error' : 'badge-warning'}`}>
-                                        {v.severity === 'unbreakable' ? 'UNB' : 'BRK'}
-                                      </span>
-                                      <div>
-                                        <strong>{v.ruleName}</strong>
-                                        <p className="text-base-content/50">{v.description}</p>
+                      <div className="overflow-x-auto rounded border border-base-300/60">
+                        <div className="min-w-[1080px]">
+                          <div className="grid grid-cols-[74px_64px_34px_minmax(190px,1.5fr)_minmax(150px,1fr)_130px_100px_110px_42px] gap-2 px-2 py-1.5 bg-base-300/40 text-[10px] font-semibold uppercase tracking-wide text-base-content/40">
+                            <span>Start</span>
+                            <span>Duration</span>
+                            <span>Icon</span>
+                            <span>Title</span>
+                            <span>Artist</span>
+                            <span>Category</span>
+                            <span>Omni Title ID</span>
+                            <span>Omni ItemCode</span>
+                            <span />
+                          </div>
+                          {items.sort((a, b) => a.position - b.position).map((item, i) => {
+                            const categoryColor = item.category?.color || item.category?.parent?.color || '#6b7280';
+                            const artwork = item.song?.artwork;
+                            return (
+                              <div key={item._id || i} className="grid grid-cols-[74px_64px_34px_minmax(190px,1.5fr)_minmax(150px,1fr)_130px_100px_110px_42px] gap-2 items-center px-2 py-1.5 border-t border-base-300/40 hover:bg-base-100">
+                                <span className="text-xs font-mono text-base-content/60">{formatStartTime(item.estimatedStartTime)}</span>
+                                <span className="text-xs font-mono text-base-content/50">{formatDuration(item.duration)}</span>
+                                <span className="w-6 h-6 rounded overflow-hidden flex items-center justify-center bg-base-300">
+                                  {artwork ? (
+                                    <img src={artwork} alt="" className="w-full h-full object-cover" />
+                                  ) : item.type === 'song' ? (
+                                    <Music className="w-3.5 h-3.5 text-blue-400" />
+                                  ) : item.type === 'imaging' ? (
+                                    <Volume2 className="w-3.5 h-3.5 text-green-400" />
+                                  ) : (
+                                    <FileText className="w-3.5 h-3.5 text-gray-400" />
+                                  )}
+                                </span>
+                                <span className="text-sm font-medium truncate" title={item.title || item.text || item.type}>
+                                  {item.title || item.text || item.type}
+                                </span>
+                                <span className="text-xs text-base-content/60 truncate" title={item.artist || item.song?.artistDisplay || ''}>
+                                  {item.artist || item.song?.artistDisplay || ''}
+                                </span>
+                                <span className="truncate">
+                                  {item.category ? (
+                                    <span className="inline-flex max-w-full text-xs px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: categoryColor }} title={item.category.name}>
+                                      <span className="truncate">{item.category.name}</span>
+                                    </span>
+                                  ) : <span className="text-base-content/20">—</span>}
+                                </span>
+                                <span className="text-xs font-mono text-base-content/50 truncate" title={item.song?.externalIds?.omniTitleId || ''}>
+                                  {item.song?.externalIds?.omniTitleId || '—'}
+                                </span>
+                                <span className="text-xs font-mono text-base-content/50 truncate" title={item.song?.externalIds?.omniItemCode || ''}>
+                                  {item.song?.externalIds?.omniItemCode || '—'}
+                                </span>
+                                <span>
+                                  {item.ruleViolations?.length > 0 && (
+                                    <div className="dropdown dropdown-end dropdown-hover">
+                                      <div tabIndex={0} className="badge badge-xs badge-warning cursor-help gap-0.5">
+                                        {item.ruleViolations.some(v => v.severity === 'unbreakable')
+                                          ? <Shield className="w-2.5 h-2.5" />
+                                          : <AlertTriangle className="w-2.5 h-2.5" />
+                                        }
+                                        {item.ruleViolations.length}
+                                      </div>
+                                      <div tabIndex={0} className="dropdown-content z-20 shadow bg-base-100 rounded-lg p-2 w-72">
+                                        {item.ruleViolations.map((v, vi) => (
+                                          <div key={vi} className="text-xs py-1 flex gap-2">
+                                            <span className={`badge badge-xs ${v.severity === 'unbreakable' ? 'badge-error' : 'badge-warning'}`}>
+                                              {v.severity === 'unbreakable' ? 'UNB' : 'BRK'}
+                                            </span>
+                                            <div>
+                                              <strong>{v.ruleName}</strong>
+                                              <p className="text-base-content/50">{v.description}</p>
+                                            </div>
+                                          </div>
+                                        ))}
                                       </div>
                                     </div>
-                                  ))}
-                                </div>
+                                  )}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        ))}
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
