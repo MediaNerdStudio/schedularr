@@ -285,6 +285,7 @@ export default function GridsPage() {
   };
 
   const clockMap = useMemo(() => new Map(clockList.map(clock => [clock._id, clock])), [clockList]);
+  const clocksByName = useMemo(() => new Map(clockList.map(clock => [clock.name.toLowerCase(), clock])), [clockList]);
 
   const assignmentRows = useMemo(() => Array.from({ length: 24 }, (_, hour) => {
     const row = { hour, hourLabel: `${String(hour).padStart(2, '0')}:00` };
@@ -314,12 +315,18 @@ export default function GridsPage() {
       minWidth: 110,
       sortable: false,
       editable: true,
-      cellEditor: 'agSelectCellEditor',
-      cellEditorParams: {
-        values: ['', ...clockList.map(clock => clock._id)],
-        formatValue: value => clockMap.get(value)?.code || '-',
+      cellEditor: 'agTextCellEditor',
+      cellEditorParams: { useFormatter: true },
+      valueFormatter: params => clockMap.get(params.value)?.name || '',
+      valueParser: params => {
+        const input = String(params.newValue || '').trim();
+        if (!input) return '';
+        const normalized = input.toLowerCase();
+        const direct = clocksByName.get(normalized)
+          || clockList.find(item => item.code.toLowerCase() === normalized);
+        const matches = direct ? [direct] : clockList.filter(item => item.name.toLowerCase().includes(normalized));
+        return matches.length === 1 ? matches[0]._id : params.oldValue;
       },
-      valueFormatter: params => clockMap.get(params.value)?.code || '-',
       cellClassRules: {
         'assignment-cell-selected': params => selectedCellsRef.current.has(cellKey(day, params.data.hour)),
       },
@@ -328,7 +335,7 @@ export default function GridsPage() {
         return clock ? { backgroundColor: `${clock.color}20`, borderColor: clock.color } : null;
       },
     })),
-  ], [clockList, clockMap]);
+  ], [clockList, clockMap, clocksByName]);
 
   const handleCellValueChanged = event => {
     const cell = assignmentCell(event.column.getColId(), event.data?.hour);
