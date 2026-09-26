@@ -19,6 +19,7 @@ const CompactGrid = forwardRef(({
   persistenceKey,
 }, ref) => {
   const innerRef = useRef(null);
+  const gridApiRef = useRef(null);
   useImperativeHandle(ref, () => innerRef.current, [innerRef]);
 
   const [isDark, setIsDark] = useState(false);
@@ -65,13 +66,14 @@ const CompactGrid = forwardRef(({
   }, []);
 
   useEffect(() => {
-    if (gridReady && innerRef.current?.api) {
-      innerRef.current.api.setGridOption('quickFilterText', quickFilter);
+    if (gridReady && gridApiRef.current) {
+      gridApiRef.current.setGridOption('quickFilterText', quickFilter);
     }
     if (persistenceKey) sessionStorage.setItem(`${persistenceKey}:search`, quickFilter);
   }, [quickFilter, gridReady, persistenceKey]);
 
   const onGridReady = (event) => {
+    gridApiRef.current = event.api;
     setGridReady(true);
     // ensure visibility state matches current grid
     const api = event.api;
@@ -101,11 +103,22 @@ const CompactGrid = forwardRef(({
     sessionStorage.setItem(`${persistenceKey}:sort`, JSON.stringify(sortState));
   };
 
+  const handleColumnVisible = (event) => {
+    if (!event.column) return;
+    setVisibility(previous => ({
+      ...previous,
+      [event.column.getColId()]: event.column.isVisible(),
+    }));
+  };
+
   const toggleColumn = (key) => {
-    if (!innerRef.current?.api) return;
-    const nextVisible = !visibility[key];
-    innerRef.current.api.setColumnsVisible([key], nextVisible);
-    setVisibility(v => ({ ...v, [key]: nextVisible }));
+    const api = gridApiRef.current;
+    if (!api) return;
+    const column = api.getColumn(key);
+    if (!column) return;
+    const nextVisible = !column.isVisible();
+    api.applyColumnState({ state: [{ colId: key, hide: !nextVisible }] });
+    setVisibility(previous => ({ ...previous, [key]: nextVisible }));
   };
 
   const themeClass = isDark ? 'ag-theme-alpine-dark' : 'ag-theme-alpine';
@@ -199,6 +212,7 @@ const CompactGrid = forwardRef(({
           overlayNoRowsTemplate={`<span class="text-base-content/40 text-sm">${noRowsMessage}</span>`}
           onGridReady={onGridReady}
           onSortChanged={handleSortChanged}
+          onColumnVisible={handleColumnVisible}
         />
       </div>
     </div>
