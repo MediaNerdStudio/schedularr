@@ -29,6 +29,11 @@ function buildCategoryTree(categories) {
     if (c.parent && map[c.parent]) map[c.parent].children.push(map[c._id]);
     else roots.push(map[c._id]);
   }
+  const applyColor = (nodes, inheritedColor = '#6b7280') => nodes.forEach(node => {
+    node.effectiveColor = node.color || inheritedColor;
+    applyColor(node.children, node.effectiveColor);
+  });
+  applyColor(roots);
   roots.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
   return roots;
 }
@@ -45,7 +50,9 @@ function renderCategoryTree(nodes, depth, onDragStart) {
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           title="Drag to add to clock"
         >
-          {hasChildren ? <FolderOpen className="w-3 h-3 text-base-content/50" /> : <Music className="w-3 h-3 text-base-content/50" />}
+          <span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: cat.effectiveColor }}>
+            {hasChildren ? <FolderOpen className="w-2.5 h-2.5 text-white" /> : <Music className="w-2.5 h-2.5 text-white" />}
+          </span>
           <span className="truncate flex-1">{cat.name}</span>
           <span className="font-mono text-[10px] text-base-content/30">{cat.code}</span>
         </div>
@@ -107,6 +114,15 @@ export default function ClockEditorPage() {
   }, [id]);
 
   const categoryTree = useMemo(() => buildCategoryTree(categoryList), [categoryList]);
+  const categoryColors = useMemo(() => {
+    const colors = new Map();
+    const collect = nodes => nodes.forEach(node => {
+      colors.set(node._id, node.effectiveColor);
+      collect(node.children);
+    });
+    collect(categoryTree);
+    return colors;
+  }, [categoryTree]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -396,6 +412,7 @@ export default function ClockEditorPage() {
                 const Icon = ELEMENT_ICONS[el.type] || Music;
                 const typeInfo = CLOCK_ELEMENT_TYPES[el.type] || { label: el.type, color: 'bg-gray-500' };
                 const cat = el.category ? categoryList.find(c => c._id === (el.category._id || el.category)) : null;
+                const catColor = cat ? categoryColors.get(cat._id) : null;
 
                 return (
                   <div key={el._id || index}>
@@ -421,7 +438,10 @@ export default function ClockEditorPage() {
                       >
                         <GripVertical className="w-4 h-4 text-base-content/30" />
                       </div>
-                      <div className={`w-6 h-6 rounded flex items-center justify-center text-white ${typeInfo.color}`}>
+                      <div
+                        className={`w-6 h-6 rounded flex items-center justify-center text-white ${catColor ? '' : typeInfo.color}`}
+                        style={catColor ? { backgroundColor: catColor } : undefined}
+                      >
                         <Icon className="w-3 h-3" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -430,7 +450,7 @@ export default function ClockEditorPage() {
                             {el.label || cat?.name || typeInfo.label}
                           </span>
                           {cat && (
-                            <span className="text-xs px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: cat.color, color: 'white' }}>
+                            <span className="text-xs px-1.5 py-0.5 rounded font-mono text-white" style={{ backgroundColor: catColor }}>
                               {cat.code}
                             </span>
                           )}
@@ -491,6 +511,7 @@ export default function ClockEditorPage() {
                     const duration = el.estimatedDuration || (total / elements.length);
                     const sweep = (duration / total) * 360;
                     const cat = el.category ? categoryList.find(c => c._id === (el.category._id || el.category)) : null;
+                    const catColor = cat ? categoryColors.get(cat._id) : null;
 
                     const startRad = startAngle * Math.PI / 180;
                     const endRad = (startAngle + sweep) * Math.PI / 180;
@@ -505,7 +526,7 @@ export default function ClockEditorPage() {
                       <path
                         key={i}
                         d={`M 100 100 L ${x1} ${y1} A 85 85 0 ${largeArc} 1 ${x2} ${y2} Z`}
-                        fill={cat?.color || '#666'}
+                        fill={catColor || '#666'}
                         stroke="oklch(var(--b1))"
                         strokeWidth="1"
                         opacity="0.7"
@@ -523,9 +544,10 @@ export default function ClockEditorPage() {
             <div className="mt-3 space-y-1">
               {(clock.elements || []).slice(0, 8).map((el, i) => {
                 const cat = el.category ? categoryList.find(c => c._id === (el.category._id || el.category)) : null;
+                const catColor = cat ? categoryColors.get(cat._id) : null;
                 return (
                   <div key={i} className="flex items-center gap-2 text-xs">
-                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: cat?.color || '#666' }} />
+                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: catColor || '#666' }} />
                     <span className="truncate">{el.label || cat?.name || CLOCK_ELEMENT_TYPES[el.type]?.label}</span>
                   </div>
                 );
