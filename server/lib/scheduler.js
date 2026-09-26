@@ -73,6 +73,7 @@ export async function scheduleHours(options) {
 
   const results = [];
   const stats = { totalSongs: 0, totalViolations: 0, unscheduledPositions: 0 };
+  const candidateCache = new Map();
 
   // 6. Schedule each hour
   for (let hour = startHour; hour <= endHour; hour++) {
@@ -101,26 +102,9 @@ export async function scheduleHours(options) {
 
     // Schedule this hour
     const scheduledHour = await scheduleOneHour({
-      stationId, date, hour, clock, rules, categoryMap, playLog, stats,
+      stationId, date, hour, clock, rules, categoryMap, candidateCache, playLog, stats,
     });
     results.push(scheduledHour);
-
-    // Add scheduled songs to play log for subsequent hours
-    for (const item of scheduledHour.items) {
-      if (item.song && item.type === 'song') {
-        const estimatedTime = new Date(date);
-        estimatedTime.setHours(hour);
-        estimatedTime.setMinutes(item.position * 3); // rough estimate
-        playLog.push({
-          song: item.song.toString(),
-          artist: item.artist,
-          title: item.title,
-          category: item.category?.toString(),
-          playedAt: estimatedTime,
-          station: stationId,
-        });
-      }
-    }
   }
 
   return { hours: results, stats };
@@ -129,7 +113,7 @@ export async function scheduleHours(options) {
 /**
  * Schedule a single hour.
  */
-async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMap, playLog, stats }) {
+async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMap, candidateCache, playLog, stats }) {
   const items = [];
   let runningTime = 0; // ms into the hour
 
@@ -149,7 +133,7 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
       case 'fixed':
       case 'imaging': {
         item = await scheduleFixedElement(element, {
-          stationId, date, hour, rules, categoryMap, playLog, estimatedStart, stats,
+          stationId, date, hour, rules, categoryMap, candidateCache, playLog, estimatedStart, stats,
         });
         break;
       }
@@ -206,6 +190,16 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
       item.estimatedStartTime = estimatedStart;
       items.push(item);
       runningTime += item.duration || 0;
+      if (item.song) {
+        playLog.unshift({
+          song: item.song.toString(),
+          artist: item.artist,
+          title: item.title,
+          category: item.category?.toString(),
+          playedAt: estimatedStart,
+          station: stationId,
+        });
+      }
       if (item.type === 'song') stats.totalSongs++;
     }
   }
@@ -237,7 +231,7 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
  * Schedule a fixed category element — pick the best song from the category.
  */
 async function scheduleFixedElement(element, ctx) {
-  const { stationId, date, hour, rules, categoryMap, playLog, estimatedStart } = ctx;
+  const { stationId, date, hour, rules, categoryMap, candidateCache, playLog, estimatedStart } = ctx;
   const categoryId = element.category?._id?.toString() || element.category?.toString();
 
   if (!categoryId) {
@@ -259,24 +253,17 @@ async function scheduleFixedElement(element, ctx) {
     };
   }
 
-  // Determine search depth
-  const searchDepth = category.rules?.searchDepth || 20;
-
-  // Find songs in this category, sorted by last play (oldest first = front of rotation)
-  const songFilter = {
-    'categoryAssignments.category': category._id,
-    isActive: true,
-    isArchived: { $ne: true },
-  };
-
-  // Get candidate songs
-  const songCount = await Song.countDocuments(songFilter);
-  const limit = Math.max(10, Math.ceil(songCount * searchDepth / 100));
-
-  const candidates = await Song.find(songFilter)
-    .populate('primaryArtist', 'name separationGroup')
-    .limit(limit)
-    .lean();
+  let candidates = candidateCache.get(categoryId);
+  if (!candidates) {
+    candidates = await Song.find({
+      'categoryAssignments.category': category._id,
+      isActive: true,
+      isArchived: { $ne: true },
+    })
+      .populate('primaryArtist', 'name separationGroup')
+      .lean();
+    candidateCache.set(categoryId, candidates);
+  }
 
   if (candidates.length === 0) {
     return {
@@ -291,7 +278,8 @@ async function scheduleFixedElement(element, ctx) {
   const scored = [];
   for (const song of candidates) {
     const evaluation = evaluateRules(song, category, rules, playLog, estimatedStart);
-    scored.push({ song, evaluation });
+    const weight = Math.max(1, song.weight || 50);
+    scored.push({ song, evaluation, randomRank: Math.pow(Math.random(), 100 / weight) });
   }
 
   // Sort: unbreakable violations first (eliminate), then by score (fewer violations = better)
@@ -304,11 +292,10 @@ async function scheduleFixedElement(element, ctx) {
     if (a.evaluation.totalViolations !== b.evaluation.totalViolations) {
       return a.evaluation.totalViolations - b.evaluation.totalViolations;
     }
-    // Tie-break: use weight, then random
-    if (a.song.weight !== b.song.weight) {
-      return b.song.weight - a.song.weight; // higher weight = better
+    if (a.evaluation.score !== b.evaluation.score) {
+      return b.evaluation.score - a.evaluation.score;
     }
-    return Math.random() - 0.5;
+    return b.randomRank - a.randomRank;
   });
 
   const best = scored[0];
@@ -407,13 +394,28 @@ async function scheduleSpecificSong(element, ctx) {
  */
 function evaluateRules(song, category, rules, playLog, scheduledTime) {
   const violations = [];
+  const repeatedThisHour = playLog.some(entry => {
+    const playedAt = new Date(entry.playedAt);
+    return entry.song === song._id.toString()
+      && playedAt.getFullYear() === scheduledTime.getFullYear()
+      && playedAt.getMonth() === scheduledTime.getMonth()
+      && playedAt.getDate() === scheduledTime.getDate()
+      && playedAt.getHours() === scheduledTime.getHours();
+  });
+  if (repeatedThisHour) {
+    violations.push({
+      ruleName: 'Same Hour Repeat',
+      severity: 'unbreakable',
+      description: 'Song is already scheduled in this hour',
+    });
+  }
 
   // Category-level rules (embedded in the category document)
   const catRules = category.rules || {};
 
   // Song separation
   if (catRules.songSeparation > 0) {
-    const lastPlay = findLastPlay(playLog, { songId: song._id.toString() });
+    const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
     if (lastPlay) {
       const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
       if (minutesSince < catRules.songSeparation) {
@@ -430,7 +432,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
   if (catRules.artistPrimarySeparation > 0 && song.primaryArtist) {
     const artistName = song.primaryArtist.name || song.artistDisplay;
     const artistGroup = song.primaryArtist.separationGroup || artistName;
-    const lastArtistPlay = findLastPlay(playLog, { artistName: artistGroup });
+    const lastArtistPlay = findLastPlay(playLog, { artistName: artistGroup, before: scheduledTime });
     if (lastArtistPlay) {
       const minutesSince = (scheduledTime - lastArtistPlay.playedAt) / 60000;
       if (minutesSince < catRules.artistPrimarySeparation) {
@@ -445,7 +447,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
 
   // Title separation
   if (catRules.titleSeparation > 0) {
-    const lastTitlePlay = findLastPlay(playLog, { title: song.title });
+    const lastTitlePlay = findLastPlay(playLog, { title: song.title, before: scheduledTime });
     if (lastTitlePlay && lastTitlePlay.song !== song._id.toString()) {
       const minutesSince = (scheduledTime - lastTitlePlay.playedAt) / 60000;
       if (minutesSince < catRules.titleSeparation) {
@@ -553,7 +555,7 @@ function evaluateExternalRule(rule, song, playLog, scheduledTime) {
   switch (rule.type) {
     case 'song-minimum-rest': {
       if (!params.separation) return null;
-      const lastPlay = findLastPlay(playLog, { songId: song._id.toString() });
+      const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
       if (lastPlay) {
         const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
         if (minutesSince < params.separation) {
@@ -566,7 +568,7 @@ function evaluateExternalRule(rule, song, playLog, scheduledTime) {
     case 'artist-primary-separation': {
       if (!params.separation || !song.primaryArtist) return null;
       const artistName = song.primaryArtist.name || song.artistDisplay;
-      const lastPlay = findLastPlay(playLog, { artistName });
+      const lastPlay = findLastPlay(playLog, { artistName, before: scheduledTime });
       if (lastPlay) {
         const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
         if (minutesSince < params.separation) {
@@ -600,7 +602,7 @@ function calculateGoalScore(song, playLog, scheduledTime) {
   let score = 0;
 
   // Goal 1: Optimum Song Rest (prefer songs that haven't played in a while)
-  const lastPlay = findLastPlay(playLog, { songId: song._id.toString() });
+  const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
   if (lastPlay) {
     const hoursSince = (scheduledTime - lastPlay.playedAt) / 3600000;
     score += Math.min(hoursSince, 168); // cap at 1 week
@@ -614,7 +616,7 @@ function calculateGoalScore(song, playLog, scheduledTime) {
   // Goal 3: Artist spread (prefer artists not recently played)
   const artistName = song.primaryArtist?.name || song.artistDisplay;
   if (artistName) {
-    const lastArtistPlay = findLastPlay(playLog, { artistName });
+    const lastArtistPlay = findLastPlay(playLog, { artistName, before: scheduledTime });
     if (lastArtistPlay) {
       const hoursSince = (scheduledTime - lastArtistPlay.playedAt) / 3600000;
       score += Math.min(hoursSince, 48) * 0.3;
@@ -631,6 +633,7 @@ function calculateGoalScore(song, playLog, scheduledTime) {
  */
 function findLastPlay(playLog, criteria) {
   for (const entry of playLog) {
+    if (criteria.before && new Date(entry.playedAt) > criteria.before) continue;
     if (criteria.songId && entry.song === criteria.songId) return entry;
     if (criteria.artistName && entry.artist === criteria.artistName) return entry;
     if (criteria.title && entry.title === criteria.title) return entry;
@@ -659,10 +662,12 @@ function buildPlayLog(history, scheduledHours) {
   // Add already-scheduled items
   for (const hour of scheduledHours) {
     for (const item of hour.items || []) {
-      if (item.song && item.type === 'song') {
-        const estimatedTime = new Date(hour.date);
-        estimatedTime.setHours(hour.hour);
-        estimatedTime.setMinutes(item.position * 3);
+      if (item.song) {
+        const estimatedTime = item.estimatedStartTime || new Date(hour.date);
+        if (!item.estimatedStartTime) {
+          estimatedTime.setHours(hour.hour);
+          estimatedTime.setMinutes(item.position * 3);
+        }
         log.push({
           song: item.song.toString(),
           artist: item.artist,
