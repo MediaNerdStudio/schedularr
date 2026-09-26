@@ -434,7 +434,7 @@ export default function CategoriesPage() {
   if (loading) return <div className="flex items-center justify-center h-full"><span className="loading loading-spinner loading-lg" /></div>;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Left: Category Tree */}
       <div className="w-72 shrink-0 border-r border-base-300 flex flex-col bg-base-100">
         <div className="flex items-center justify-between p-3 border-b border-base-300">
