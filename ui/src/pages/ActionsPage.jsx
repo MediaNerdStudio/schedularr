@@ -14,6 +14,9 @@ export default function ActionsPage() {
   const [error, setError] = useState(null);
   const [details, setDetails] = useState([]);
   const [working, setWorking] = useState('');
+  const [chartPreview, setChartPreview] = useState(null);
+  const [chartResult, setChartResult] = useState(null);
+  const [chartError, setChartError] = useState(null);
 
   useEffect(() => {
     stationsApi.list().then(stations => {
@@ -67,6 +70,43 @@ export default function ActionsPage() {
     } catch (requestError) {
       setError(requestError.response?.data?.error || requestError.message);
       setDetails(requestError.response?.data?.details || []);
+    } finally {
+      setWorking('');
+    }
+  };
+
+  const previewChartSync = async () => {
+    setWorking('chart-preview');
+    setChartPreview(null);
+    setChartResult(null);
+    setChartError(null);
+    try {
+      const response = await api.post('/actions/westradio-charts/preview');
+      setChartPreview(response.data);
+    } catch (requestError) {
+      setChartError(requestError.response?.data?.error || requestError.message);
+    } finally {
+      setWorking('');
+    }
+  };
+
+  const runChartSync = async () => {
+    if (!chartPreview) return;
+    const confirmed = confirm(
+      `Apply the latest Top 40 and Tipparade categories?\n\n` +
+      `${chartPreview.activateTop40} songs → Hits | Top 40\n` +
+      `${chartPreview.activateTipparade} songs → Hits | Tipparade\n` +
+      `${chartPreview.releaseToDecades} exiting songs → decade | A Rotation`,
+    );
+    if (!confirmed) return;
+    setWorking('chart-sync');
+    setChartError(null);
+    try {
+      const response = await api.post('/actions/westradio-charts/sync', { confirm: true });
+      setChartResult(response.data);
+      setChartPreview(null);
+    } catch (requestError) {
+      setChartError(requestError.response?.data?.error || requestError.message);
     } finally {
       setWorking('');
     }
@@ -193,6 +233,67 @@ export default function ActionsPage() {
             <button className="btn btn-primary" onClick={runSync} disabled={!preview || !!working}>
               {working === 'sync' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               Sync to Omni
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="card bg-base-200 border border-base-300 shadow-sm mt-4">
+        <div className="card-body p-5">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-lg bg-secondary/10 flex items-center justify-center shrink-0">
+              <CalendarDays className="w-6 h-6 text-secondary" />
+            </div>
+            <div className="flex-1">
+              <h2 className="card-title text-lg">WestRadio Charts Sync</h2>
+              <p className="text-sm text-base-content/60">Synchronize the latest live Top 40 and Tipparade with the Hits categories using each song's <span className="font-mono">top40_id</span>.</p>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-3 mt-2 text-sm">
+            <div className="rounded-lg bg-base-100 border border-base-300 p-3">
+              <div className="font-semibold">Current entries</div>
+              <div className="text-xs text-base-content/50 mt-1">Linked chart songs are assigned exclusively to <strong>Hits | Top 40</strong> or <strong>Hits | Tipparade</strong>.</div>
+            </div>
+            <div className="rounded-lg bg-base-100 border border-base-300 p-3">
+              <div className="font-semibold">Exiting entries</div>
+              <div className="text-xs text-base-content/50 mt-1">Songs leaving either chart move to their release-decade <strong>A Rotation</strong> category.</div>
+            </div>
+            <div className="rounded-lg bg-base-100 border border-base-300 p-3">
+              <div className="font-semibold">Unlinked entries</div>
+              <div className="text-xs text-base-content/50 mt-1">Chart entries without a matching <span className="font-mono">top40_id</span> are intentionally ignored.</div>
+            </div>
+          </div>
+
+          {chartError && <div className="alert alert-error mt-2"><AlertTriangle className="w-4 h-4" /><span>{chartError}</span></div>}
+
+          {chartPreview && (
+            <div className="alert alert-info mt-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <div className="text-sm">
+                <div className="font-semibold">Chart sync preflight passed</div>
+                <div className="text-xs mt-1">
+                  Top 40 {chartPreview.charts.top40.year}-W{String(chartPreview.charts.top40.week).padStart(2, '0')}: {chartPreview.activateTop40}/{chartPreview.charts.top40.entries} linked ·{' '}
+                  Tipparade {chartPreview.charts.tipparade.year}-W{String(chartPreview.charts.tipparade.week).padStart(2, '0')}: {chartPreview.activateTipparade}/{chartPreview.charts.tipparade.entries} linked ·{' '}
+                  {chartPreview.releaseToDecades} songs leave the charts.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {chartResult && (
+            <div className="alert alert-success mt-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Chart synchronization complete: {chartResult.updatedSongs} song assignments updated.</span>
+            </div>
+          )}
+
+          <div className="card-actions justify-end mt-2">
+            <button className="btn btn-ghost" onClick={previewChartSync} disabled={!!working}>
+              {working === 'chart-preview' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} Run preflight
+            </button>
+            <button className="btn btn-secondary" onClick={runChartSync} disabled={!chartPreview || !!working}>
+              {working === 'chart-sync' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Sync charts
             </button>
           </div>
         </div>

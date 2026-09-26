@@ -1,192 +1,176 @@
-import { useState, useEffect } from 'react';
-import { BarChart3, Plus, Pencil, Trash2, TrendingUp, TrendingDown, Minus, Star } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BarChart3, ChevronLeft, ChevronRight, Link2, Loader2 } from 'lucide-react';
 import { charts } from '../lib/api';
+
+function periodLabel(periodType, period) {
+  if (!period) return '';
+  return periodType === 'week'
+    ? `${period.year}-W${String(period.week).padStart(2, '0')}`
+    : `${period.year} #${period.edition}`;
+}
 
 export default function ChartsPage() {
   const [chartList, setChartList] = useState([]);
+  const [selectedSlug, setSelectedSlug] = useState('');
+  const [periodType, setPeriodType] = useState('week');
+  const [periods, setPeriods] = useState([]);
+  const [periodIndex, setPeriodIndex] = useState(-1);
+  const [periodInput, setPeriodInput] = useState('');
+  const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedChart, setSelectedChart] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', maxEntries: 40, chartDate: new Date().toISOString().slice(0, 10) });
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const load = async () => {
-    try {
-      const data = await charts.list();
+  const selectedChart = chartList.find(chart => chart.slug === selectedSlug);
+  const selectedPeriod = periods[periodIndex];
+
+  useEffect(() => {
+    charts.list().then(data => {
       setChartList(data);
-      if (data.length && !selectedChart) setSelectedChart(data[0]);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (data.length) setSelectedSlug(data[0].slug);
+    }).catch(requestError => setError(requestError.response?.data?.error || requestError.message))
+      .finally(() => setLoading(false));
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!selectedSlug) return;
+    setEntries([]);
+    setPeriods([]);
+    setPeriodIndex(-1);
+    setError('');
+    charts.periods(selectedSlug).then(data => {
+      setPeriodType(data.periodType);
+      setPeriods(data.periods || []);
+      setPeriodIndex(data.periods?.length ? 0 : -1);
+    }).catch(requestError => setError(requestError.response?.data?.error || requestError.message));
+  }, [selectedSlug]);
 
-  const handleCreate = async () => {
-    try {
-      const chart = await charts.create({
-        ...createForm,
-        chartDate: new Date(createForm.chartDate),
-        entries: [],
-      });
-      setShowCreateModal(false);
-      setChartList([chart, ...chartList]);
-      setSelectedChart(chart);
-    } catch (err) {
-      alert(err.response?.data?.error || err.message);
-    }
-  };
+  useEffect(() => {
+    setPeriodInput(periodLabel(periodType, selectedPeriod));
+  }, [periodType, selectedPeriod]);
 
-  const handleDelete = async (chart) => {
-    if (!confirm(`Delete chart "${chart.name}"?`)) return;
-    try {
-      await charts.delete(chart._id);
-      setChartList(prev => prev.filter(c => c._id !== chart._id));
-      if (selectedChart?._id === chart._id) setSelectedChart(null);
-    } catch (err) {
-      alert(err.response?.data?.error || err.message);
-    }
-  };
+  useEffect(() => {
+    if (!selectedSlug || !selectedPeriod) return;
+    setEntriesLoading(true);
+    setError('');
+    charts.entries(selectedSlug, selectedPeriod).then(data => setEntries(data.entries || []))
+      .catch(requestError => setError(requestError.response?.data?.error || requestError.message))
+      .finally(() => setEntriesLoading(false));
+  }, [selectedSlug, selectedPeriod]);
 
-  const movementIcon = (movement) => {
-    switch (movement) {
-      case 'up': return <TrendingUp className="w-3 h-3 text-green-500" />;
-      case 'down': return <TrendingDown className="w-3 h-3 text-red-500" />;
-      case 'new': return <Star className="w-3 h-3 text-amber-500" />;
-      case 'reentry': return <Star className="w-3 h-3 text-blue-500" />;
-      default: return <Minus className="w-3 h-3 text-base-content/30" />;
-    }
+  const sortedEntries = useMemo(() => {
+    const active = entries.filter(entry => entry.current !== 0);
+    const exited = entries.filter(entry => entry.current === 0);
+    return [...active, ...exited];
+  }, [entries]);
+
+  const selectPeriodLabel = value => {
+    const index = periods.findIndex(period => periodLabel(periodType, period) === value);
+    if (index >= 0) setPeriodIndex(index);
   };
 
   if (loading) return <div className="flex items-center justify-center h-full"><span className="loading loading-spinner loading-lg" /></div>;
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-primary" />
-            Charts
-          </h1>
-          <p className="text-sm text-base-content/60 mt-1">Manage in-house charts and track chart performance.</p>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)}>
-          <Plus className="w-4 h-4" /> New Chart
-        </button>
+    <div className="p-6 h-full min-h-0 flex flex-col gap-4">
+      <div>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <BarChart3 className="w-6 h-6 text-primary" /> Charts
+        </h1>
+        <p className="text-sm text-base-content/60 mt-1">Live chart data from WatHoordeIk. Charts are not copied into the Schedularr database.</p>
       </div>
 
-      <div className="flex gap-6">
-        {/* Chart list */}
-        <div className="w-60 shrink-0 space-y-1">
-          {chartList.map(chart => (
-            <div key={chart._id}
-              className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
-                selectedChart?._id === chart._id ? 'bg-primary/10 border border-primary/30' : 'bg-base-200 hover:bg-base-300/50'
-              }`}
-              onClick={() => setSelectedChart(chart)}
-            >
-              <BarChart3 className="w-4 h-4 text-primary shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{chart.name}</p>
-                <p className="text-xs text-base-content/40">{new Date(chart.chartDate).toLocaleDateString()} | {chart.entries?.length || 0} entries</p>
-              </div>
-              <button className="btn btn-ghost btn-xs text-error" onClick={e => { e.stopPropagation(); handleDelete(chart); }}>
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          ))}
-          {chartList.length === 0 && (
-            <p className="text-sm text-base-content/40 text-center py-8">No charts yet</p>
-          )}
-        </div>
-
-        {/* Chart detail */}
-        <div className="flex-1">
-          {selectedChart ? (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold">{selectedChart.name}</h2>
-                <span className="text-sm text-base-content/50">
-                  Week of {new Date(selectedChart.chartDate).toLocaleDateString()}
-                </span>
-              </div>
-              {(selectedChart.entries || []).length === 0 ? (
-                <div className="text-center py-12 bg-base-200 rounded-lg">
-                  <p className="text-base-content/40 text-sm">No entries in this chart yet. Add songs from the library.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="table table-sm">
-                    <thead>
-                      <tr>
-                        <th className="w-12">#</th>
-                        <th className="w-8"></th>
-                        <th>Title</th>
-                        <th>Artist</th>
-                        <th className="w-16">Last Wk</th>
-                        <th className="w-16">Peak</th>
-                        <th className="w-16">Weeks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedChart.entries
-                        .sort((a, b) => a.rankThisWeek - b.rankThisWeek)
-                        .map((entry, i) => (
-                          <tr key={i}>
-                            <td className="font-bold text-lg">{entry.rankThisWeek}</td>
-                            <td>{movementIcon(entry.movement)}</td>
-                            <td className="font-medium">{entry.song?.title || '-'}</td>
-                            <td className="text-base-content/60">{entry.song?.artistDisplay || '-'}</td>
-                            <td className="font-mono">{entry.rankLastWeek || 'NEW'}</td>
-                            <td className="font-mono">{entry.peakPosition || '-'}</td>
-                            <td className="font-mono">{entry.weeksOnChart}</td>
-                          </tr>
-                        ))
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-20">
-              <BarChart3 className="w-16 h-16 mx-auto text-base-content/20 mb-4" />
-              <p className="text-base-content/40">Select a chart to view its entries.</p>
-            </div>
-          )}
-        </div>
+      <div className="flex flex-wrap gap-2">
+        {chartList.map(chart => (
+          <button
+            key={chart.slug}
+            className={`btn btn-sm h-auto min-h-12 px-4 ${selectedSlug === chart.slug ? 'btn-primary' : 'btn-ghost bg-base-200 border border-base-300'}`}
+            onClick={() => setSelectedSlug(chart.slug)}
+          >
+            <span className="flex flex-col items-start">
+              <span>{chart.name}</span>
+              <span className="text-[10px] opacity-60 font-normal">{chart.publisher}</span>
+            </span>
+          </button>
+        ))}
       </div>
 
-      {showCreateModal && (
-        <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">New Chart</h3>
-            <div className="grid gap-3 mt-4">
-              <div className="form-control">
-                <label className="label"><span className="label-text">Name</span></label>
-                <input className="input input-bordered input-sm" value={createForm.name}
-                  onChange={e => setCreateForm({ ...createForm, name: e.target.value })} placeholder="e.g., Top 40" />
-              </div>
-              <div className="form-control">
-                <label className="label"><span className="label-text">Chart Date</span></label>
-                <input className="input input-bordered input-sm" type="date" value={createForm.chartDate}
-                  onChange={e => setCreateForm({ ...createForm, chartDate: e.target.value })} />
-              </div>
-              <div className="form-control">
-                <label className="label"><span className="label-text">Max Entries</span></label>
-                <input className="input input-bordered input-sm" type="number" value={createForm.maxEntries}
-                  onChange={e => setCreateForm({ ...createForm, maxEntries: Number(e.target.value) })} />
-              </div>
-            </div>
-            <div className="modal-action">
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowCreateModal(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={!createForm.name}>Create</button>
-            </div>
+      <div className="card bg-base-200 border border-base-300">
+        <div className="card-body p-3">
+          <div className="font-semibold text-sm">{periodType === 'week' ? 'Charts week selection' : 'Charts edition selection'}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-base-content/60">{periodType === 'week' ? 'Week' : 'Edition'}</span>
+            <input
+              className="input input-bordered input-sm bg-base-100 w-44"
+              type={periodType === 'week' ? 'week' : 'text'}
+              list="chart-periods"
+              value={periodInput}
+              onChange={event => {
+                setPeriodInput(event.target.value);
+                selectPeriodLabel(event.target.value);
+              }}
+              disabled={!periods.length}
+            />
+            <datalist id="chart-periods">
+              {periods.map((period, index) => <option key={index} value={periodLabel(periodType, period)} />)}
+            </datalist>
+            <button className="btn btn-sm btn-ghost" disabled={periodIndex < 0 || periodIndex >= periods.length - 1} onClick={() => setPeriodIndex(index => index + 1)}>
+              <ChevronLeft className="w-4 h-4" /> Previous {periodType === 'week' ? 'week' : 'edition'}
+            </button>
+            <button className="btn btn-sm btn-ghost" disabled={periodIndex <= 0} onClick={() => setPeriodIndex(index => index - 1)}>
+              Next {periodType === 'week' ? 'week' : 'edition'} <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-          <div className="modal-backdrop" onClick={() => setShowCreateModal(false)} />
+          <div className="text-xs text-base-content/40">
+            {periodType === 'week' ? 'Week selection applies to Top 40 and Tipparade.' : 'Edition selection applies to this chart.'}
+          </div>
         </div>
-      )}
+      </div>
+
+      {error && <div className="alert alert-error"><span>{error}</span></div>}
+
+      <div className="card bg-base-200 border border-base-300 flex-1 min-h-0 overflow-hidden">
+        <div className="px-4 py-3 border-b border-base-300 flex items-center justify-between">
+          <div>
+            <div className="font-bold">{selectedChart?.name || 'Chart'} {periodLabel(periodType, selectedPeriod)}</div>
+            <div className="text-xs text-base-content/40">{entries.length} entries · highlighted rows are linked to Schedularr songs</div>
+          </div>
+          {entriesLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+        </div>
+        <div className="overflow-auto flex-1 min-h-0">
+          <table className="table table-sm table-pin-rows">
+            <thead>
+              <tr>
+                <th className="w-16 text-center">#</th>
+                <th className="w-16 text-center">{periodType === 'week' ? 'LW' : 'LE'}</th>
+                {periodType === 'week' && <th className="w-16 text-center">W</th>}
+                <th>Artist</th>
+                <th>Title</th>
+                <th className="w-20 text-center">Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!entriesLoading && sortedEntries.length === 0 && (
+                <tr><td colSpan={periodType === 'week' ? 6 : 5} className="text-center text-base-content/40 py-12">No entries found for this selection.</td></tr>
+              )}
+              {sortedEntries.map((entry, index) => (
+                <tr key={`${entry.sourceId || index}-${entry.current}-${entry.section}`} className={entry.linked ? 'bg-info/10' : ''}>
+                  <td className="text-center font-bold">
+                    {entry.current === 0 ? <span className="badge badge-error badge-sm">EXIT</span> : entry.current}
+                  </td>
+                  <td className="text-center font-mono">
+                    {entry.last === 0 ? <span className="badge badge-success badge-sm">NEW</span> : entry.last ?? ''}
+                  </td>
+                  {periodType === 'week' && <td className="text-center font-mono">{entry.weeks ?? ''}</td>}
+                  <td>{entry.artist || ''}</td>
+                  <td className="font-medium">{entry.title || ''}</td>
+                  <td className="text-center">{entry.linked && <Link2 className="w-4 h-4 text-info mx-auto" />}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

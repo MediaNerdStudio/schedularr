@@ -79,11 +79,9 @@ export const grids = {
 
 // Charts
 export const charts = {
-  list: (params) => api.get('/charts', { params }).then(r => r.data),
-  get: (id) => api.get(`/charts/${id}`).then(r => r.data),
-  create: (data) => api.post('/charts', data).then(r => r.data),
-  update: (id, data) => api.put(`/charts/${id}`, data).then(r => r.data),
-  delete: (id) => api.delete(`/charts/${id}`).then(r => r.data),
+  list: () => api.get('/charts').then(r => r.data),
+  periods: slug => api.get(`/charts/${slug}/periods`).then(r => r.data),
+  entries: (slug, params) => api.get(`/charts/${slug}/entries`, { params }).then(r => r.data),
 };
 
 // Blocks

@@ -83,7 +83,7 @@ All routes under `/api/`:
 | `/api/categories` | Category CRUD + song assignment |
 | `/api/clocks` | Clock CRUD + duplicate |
 | `/api/grids` | Assignment Grid CRUD + hour assignment + Format Calendar |
-| `/api/charts` | Chart CRUD + sync to songs |
+| `/api/charts` | Read-only live charts, periods, and entries from `WatHoordeIk` |
 | `/api/blocks` | Block CRUD |
 | `/api/rules` | Rule CRUD |
 | `/api/schedules` | Schedule CRUD + play history |
@@ -100,7 +100,7 @@ All routes under `/api/`:
 - **ClockEditorPage** — visual clock builder with element list + pie chart view
 - **GridsPage** — 7×24 assignment grid editor
 - **BlocksPage** — mini-format block editor
-- **ChartsPage** — chart management with entry table
+- **ChartsPage** — live WatHoordeIk chart/period browser with linked-song highlighting
 - **RulesPage** — rule management with type groups and severity
 - **SchedulePage** — daily schedule view per station with expandable hours
 - **ActionsPage** — guarded external synchronization actions with preflight validation

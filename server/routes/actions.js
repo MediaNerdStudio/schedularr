@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { previewOmniDuplexx, syncOmniDuplexx } from '../lib/omniDuplexx.js';
+import { prepareWestRadioChartSync, syncWestRadioCharts, westRadioChartSyncSummary } from '../lib/liveCharts.js';
 
 const router = Router();
 let omniSyncRunning = false;
+let chartSyncRunning = false;
 
 function selection(body) {
   const mode = body.mode === 'future' ? 'future' : 'specific';
@@ -43,6 +45,33 @@ router.post('/omni-duplexx/sync', async (req, res) => {
     sendError(res, error);
   } finally {
     omniSyncRunning = false;
+  }
+});
+
+router.post('/westradio-charts/preview', async (_req, res) => {
+  try {
+    const plan = await prepareWestRadioChartSync();
+    if (plan.unresolved.length) {
+      const error = new Error(`${plan.unresolved.length} exiting chart songs have no release-decade A Rotation target`);
+      error.details = plan.unresolved;
+      throw error;
+    }
+    res.json(westRadioChartSyncSummary(plan));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post('/westradio-charts/sync', async (req, res) => {
+  if (chartSyncRunning) return res.status(409).json({ error: 'Another chart synchronization is already running' });
+  try {
+    if (req.body.confirm !== true) return res.status(400).json({ error: 'Explicit confirmation is required' });
+    chartSyncRunning = true;
+    res.json(await syncWestRadioCharts());
+  } catch (error) {
+    sendError(res, error);
+  } finally {
+    chartSyncRunning = false;
   }
 });
 
