@@ -11,6 +11,7 @@ import BlocksPage from './pages/BlocksPage';
 import ChartsPage from './pages/ChartsPage';
 import RulesPage from './pages/RulesPage';
 import SchedulePage from './pages/SchedulePage';
+import ActionsPage from './pages/ActionsPage';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/charts" element={<ChartsPage />} />
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/schedule" element={<SchedulePage />} />
+          <Route path="/actions" element={<ActionsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

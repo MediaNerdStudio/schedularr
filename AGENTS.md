@@ -87,6 +87,7 @@ All routes under `/api/`:
 | `/api/blocks` | Block CRUD |
 | `/api/rules` | Rule CRUD |
 | `/api/schedules` | Schedule CRUD + play history |
+| `/api/actions` | External synchronization actions, including Omni E2 Duplexx |
 | `/api/health` | Health check |
 
 ### Frontend Pages (ui/src/pages/)
@@ -102,6 +103,7 @@ All routes under `/api/`:
 - **ChartsPage** — chart management with entry table
 - **RulesPage** — rule management with type groups and severity
 - **SchedulePage** — daily schedule view per station with expandable hours
+- **ActionsPage** — guarded external synchronization actions with preflight validation
 
 ### Scheduling Engine (server/lib/scheduler.js)
 
@@ -159,3 +161,4 @@ Usage: `node server/import-tsv.js [--file <path>] [--skip-existing] [--batch-siz
 - Express 5 uses path-to-regexp v8; catch-all routes must use `{*path}` instead of `*`.
 - The Song model's `language` field conflicts with MongoDB text index's reserved `language` field. Resolved with `language_override: 'searchLanguage'` on the text index.
 - Multi-station design: all stations share the same Song/Artist/Category collections. Clocks, Grids, Schedules, and Rules are scoped per station.
+- Omni E2 Duplexx uses `OMNI_ENV_FILE` or the sibling `MediaNerd.OmniDatabase/.env` for Sybase settings and requires preflight before transactional writes.

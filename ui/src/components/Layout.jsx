@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Radio, Music, LayoutGrid, Clock, CalendarDays,
-  BarChart3, Layers, Shield, ListMusic, Blocks
+  BarChart3, Layers, Shield, ListMusic, Blocks, Activity
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/charts', icon: BarChart3, label: 'Charts' },
   { to: '/rules', icon: Shield, label: 'Rules' },
   { to: '/schedule', icon: ListMusic, label: 'Schedule' },
+  { to: '/actions', icon: Activity, label: 'Actions' },
 ];
 
 export default function Layout() {

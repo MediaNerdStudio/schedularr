@@ -17,6 +17,7 @@ import chartsRouter from './routes/charts.js';
 import blocksRouter from './routes/blocks.js';
 import rulesRouter from './routes/rules.js';
 import schedulesRouter from './routes/schedules.js';
+import actionsRouter from './routes/actions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(__dirname, '..', 'ui');
@@ -38,6 +39,7 @@ app.use('/api/charts', chartsRouter);
 app.use('/api/blocks', blocksRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/schedules', schedulesRouter);
+app.use('/api/actions', actionsRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0' });
