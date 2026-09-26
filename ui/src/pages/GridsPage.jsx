@@ -249,10 +249,10 @@ export default function GridsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <select className="select select-bordered select-sm" value={selectedStation}
+          <select className="select select-bordered select-sm bg-base-100 text-base-content" value={selectedStation}
             onChange={e => { setSelectedStation(e.target.value); setSelectedGrid(null); setSelectedCells(new Set()); }}>
-            <option value="">All Stations</option>
-            {stationList.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
+            <option className="bg-base-100 text-base-content" value="">All Stations</option>
+            {stationList.map(s => <option className="bg-base-100 text-base-content" key={s._id} value={s._id}>{s.name}</option>)}
           </select>
           <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)} disabled={stationList.length === 0}>
             <Plus className="w-4 h-4" /> New Grid
@@ -350,15 +350,15 @@ export default function GridsPage() {
                           <select
                             data-day={day}
                             data-hour={hour}
-                            className={`select select-xs w-full font-mono text-xs ${isSelected ? 'ring-1 ring-primary' : ''}`}
+                            className={`select select-xs w-full bg-base-100 text-base-content font-mono text-xs ${isSelected ? 'ring-1 ring-primary' : ''}`}
                             style={clock ? { backgroundColor: clock.color + '20', borderColor: clock.color } : {}}
                             value={clock?._id || ''}
                             onMouseDown={e => handleCellMouseDown(e, day, hour)}
                             onChange={e => handleAssignClock(day, hour, e.target.value)}
                           >
-                            <option value="">-</option>
+                            <option className="bg-base-100 text-base-content" value="">-</option>
                             {clockList.map(c => (
-                              <option key={c._id} value={c._id}>{c.code}</option>
+                              <option className="bg-base-100 text-base-content" key={c._id} value={c._id}>{c.code}</option>
                             ))}
                           </select>
                         </div>
