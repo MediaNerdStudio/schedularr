@@ -50,6 +50,11 @@ const CompactGrid = forwardRef(({
     return map;
   });
 
+  const visibleColumns = useMemo(() => normalizedColumns.map(col => {
+    const key = col.colId || col.field;
+    return key ? { ...col, hide: visibility[key] === false } : col;
+  }), [normalizedColumns, visibility]);
+
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const update = () => setIsDark(
@@ -103,22 +108,8 @@ const CompactGrid = forwardRef(({
     sessionStorage.setItem(`${persistenceKey}:sort`, JSON.stringify(sortState));
   };
 
-  const handleColumnVisible = (event) => {
-    if (!event.column) return;
-    setVisibility(previous => ({
-      ...previous,
-      [event.column.getColId()]: event.column.isVisible(),
-    }));
-  };
-
   const toggleColumn = (key) => {
-    const api = gridApiRef.current;
-    if (!api) return;
-    const column = api.getColumn(key);
-    if (!column) return;
-    const nextVisible = !column.isVisible();
-    api.applyColumnState({ state: [{ colId: key, hide: !nextVisible }] });
-    setVisibility(previous => ({ ...previous, [key]: nextVisible }));
+    setVisibility(previous => ({ ...previous, [key]: !previous[key] }));
   };
 
   const themeClass = isDark ? 'ag-theme-alpine-dark' : 'ag-theme-alpine';
@@ -191,7 +182,7 @@ const CompactGrid = forwardRef(({
           ref={innerRef}
           theme="legacy"
           rowData={rowData}
-          columnDefs={normalizedColumns}
+          columnDefs={visibleColumns}
           defaultColDef={{
             sortable: true,
             filter: true,
@@ -212,7 +203,6 @@ const CompactGrid = forwardRef(({
           overlayNoRowsTemplate={`<span class="text-base-content/40 text-sm">${noRowsMessage}</span>`}
           onGridReady={onGridReady}
           onSortChanged={handleSortChanged}
-          onColumnVisible={handleColumnVisible}
         />
       </div>
     </div>
