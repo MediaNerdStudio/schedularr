@@ -91,7 +91,15 @@ router.get('/', async (req, res) => {
 
     const hours = await ScheduleHour.find(filter)
       .populate('clock', 'name code color')
-      .populate('items.song', 'title artistDisplay artwork duration externalIds')
+      .populate({
+        path: 'items.song',
+        select: 'title artistDisplay artwork duration externalIds categoryAssignments',
+        populate: {
+          path: 'categoryAssignments.category',
+          select: 'code name color parent',
+          populate: { path: 'parent', select: 'color' },
+        },
+      })
       .populate({
         path: 'items.category',
         select: 'code name color parent',

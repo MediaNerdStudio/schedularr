@@ -371,6 +371,8 @@ async function scheduleSpecificSong(element, ctx) {
   if (element.category) {
     const categoryId = element.category._id?.toString?.() || element.category.toString();
     category = categoryMap.get(categoryId);
+  } else if (song.categoryAssignments?.length) {
+    category = categoryMap.get(song.categoryAssignments[0].category.toString());
   }
 
   if (category) {

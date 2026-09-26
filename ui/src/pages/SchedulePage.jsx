@@ -259,7 +259,8 @@ export default function SchedulePage() {
                             <span />
                           </div>
                           {items.sort((a, b) => a.position - b.position).map((item, i) => {
-                            const categoryColor = item.category?.color || item.category?.parent?.color || '#6b7280';
+                            const category = item.category || item.song?.categoryAssignments?.[0]?.category;
+                            const categoryColor = category?.color || category?.parent?.color || '#6b7280';
                             const artwork = item.song?.artwork;
                             return (
                               <div key={item._id || i} className="grid grid-cols-[74px_64px_34px_minmax(190px,1.5fr)_minmax(150px,1fr)_130px_100px_110px_42px] gap-2 items-center px-2 py-1.5 border-t border-base-300/40 hover:bg-base-100">
@@ -283,9 +284,9 @@ export default function SchedulePage() {
                                   {item.artist || item.song?.artistDisplay || ''}
                                 </span>
                                 <span className="truncate">
-                                  {item.category ? (
-                                    <span className="inline-flex max-w-full text-xs px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: categoryColor }} title={item.category.name}>
-                                      <span className="truncate">{item.category.name}</span>
+                                  {category ? (
+                                    <span className="inline-flex max-w-full text-xs px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: categoryColor }} title={category.name}>
+                                      <span className="truncate">{category.name}</span>
                                     </span>
                                   ) : <span className="text-base-content/20">—</span>}
                                 </span>
