@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { AgGridReact } from 'ag-grid-react';
 import { CalendarDays, Plus, Trash2, Copy, ClipboardPaste, X, Check, Star, Calendar } from 'lucide-react';
 import { grids, clocks as clocksApi, stations as stationsApi } from '../lib/api';
 import { DAYS_SHORT } from '../lib/utils';
@@ -11,6 +12,7 @@ export default function GridsPage() {
   const [selectedGrid, setSelectedGrid] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [isDark, setIsDark] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -20,9 +22,9 @@ export default function GridsPage() {
   // Excel-like cell selection
   const [anchorCell, setAnchorCell] = useState(null);
   const [selectedCells, setSelectedCells] = useState(new Set());
-  const [isDragging, setIsDragging] = useState(false);
   const [copyBuffer, setCopyBuffer] = useState(null);
-  const tableRef = useRef(null);
+  const gridApiRef = useRef(null);
+  const selectedCellsRef = useRef(selectedCells);
 
   const load = async () => {
     try {
@@ -47,6 +49,24 @@ export default function GridsPage() {
   };
 
   useEffect(() => { load(); }, [selectedStation]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setIsDark(document.documentElement.dataset.theme === 'dark' || media.matches);
+    update();
+    media.addEventListener('change', update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => {
+      media.removeEventListener('change', update);
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    selectedCellsRef.current = selectedCells;
+    gridApiRef.current?.refreshCells({ force: true });
+  }, [selectedCells]);
 
   // Global copy/paste listener
   useEffect(() => {
@@ -173,58 +193,147 @@ export default function GridsPage() {
     return set;
   };
 
-  const handleCellMouseDown = (e, day, hour) => {
-    if (e.button !== 0) return;
-    setIsSelecting(true);
-    setIsDragging(false);
+  const assignmentCell = (columnId, hour) => {
+    const match = /^day([0-6])$/.exec(columnId || '');
+    return match ? { day: Number(match[1]), hour } : null;
+  };
 
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const key = cellKey(day, hour);
-      const next = new Set(selectedCells);
+  const handleCellMouseDown = event => {
+    const cell = assignmentCell(event.column.getColId(), event.data?.hour);
+    const mouse = event.event;
+    if (!cell || mouse.button !== 0) return;
+    setIsSelecting(true);
+
+    if (mouse.ctrlKey || mouse.metaKey) {
+      const key = cellKey(cell.day, cell.hour);
+      const next = new Set(selectedCellsRef.current);
       if (next.has(key)) next.delete(key); else next.add(key);
       setSelectedCells(next);
-      setAnchorCell({ day, hour });
+      setAnchorCell(cell);
       return;
     }
-
-    if ((e.shiftKey) && anchorCell) {
-      e.preventDefault();
-      setSelectedCells(rangeCells(anchorCell, { day, hour }));
+    if (mouse.shiftKey && anchorCell) {
+      setSelectedCells(rangeCells(anchorCell, cell));
       return;
     }
-
-    setAnchorCell({ day, hour });
-    setSelectedCells(new Set([cellKey(day, hour)]));
+    setAnchorCell(cell);
+    setSelectedCells(new Set([cellKey(cell.day, cell.hour)]));
   };
 
-  const handleCellMouseEnter = (e, day, hour) => {
-    if (!isSelecting || !(e.buttons === 1)) return;
-    setIsDragging(true);
-    if (anchorCell) {
-      setSelectedCells(rangeCells(anchorCell, { day, hour }));
-    }
+  const handleCellMouseOver = event => {
+    const cell = assignmentCell(event.column.getColId(), event.data?.hour);
+    if (!cell || !isSelecting || event.event.buttons !== 1 || !anchorCell) return;
+    setSelectedCells(rangeCells(anchorCell, cell));
   };
 
-  const handleCellMouseUp = () => {
-    setIsSelecting(false);
-    setIsDragging(false);
+  const selectionBounds = () => {
+    const cells = [...selectedCells].map(key => {
+      const [day, hour] = key.split('-').map(Number);
+      return { day, hour };
+    });
+    if (!cells.length) return null;
+    return {
+      minDay: Math.min(...cells.map(cell => cell.day)),
+      maxDay: Math.max(...cells.map(cell => cell.day)),
+      minHour: Math.min(...cells.map(cell => cell.hour)),
+      maxHour: Math.max(...cells.map(cell => cell.hour)),
+    };
   };
 
   const copySelection = () => {
-    if (selectedCells.size === 0 || !anchorCell) return;
-    const clock = getClockForHour(anchorCell.day, anchorCell.hour);
-    setCopyBuffer(clock?._id || null);
+    const bounds = selectionBounds();
+    if (!bounds) return;
+    const values = [];
+    for (let hour = bounds.minHour; hour <= bounds.maxHour; hour++) {
+      const row = [];
+      for (let day = bounds.minDay; day <= bounds.maxDay; day++) {
+        const clock = getClockForHour(day, hour);
+        row.push(clock?._id || clock || null);
+      }
+      values.push(row);
+    }
+    setCopyBuffer({
+      rows: bounds.maxHour - bounds.minHour + 1,
+      columns: bounds.maxDay - bounds.minDay + 1,
+      values,
+    });
   };
 
   const pasteSelection = async () => {
-    if (selectedCells.size === 0 || copyBuffer == null) return;
+    const bounds = selectionBounds();
+    if (!bounds || !copyBuffer) return;
     const assignments = [];
-    selectedCells.forEach(key => {
-      const [day, hour] = key.split('-').map(Number);
-      assignments.push({ day, hour, clock: copyBuffer });
-    });
+    if (copyBuffer.rows === 1 && copyBuffer.columns === 1) {
+      selectedCells.forEach(key => {
+        const [day, hour] = key.split('-').map(Number);
+        assignments.push({ day, hour, clock: copyBuffer.values[0][0] });
+      });
+    } else {
+      for (let row = 0; row < copyBuffer.rows; row++) {
+        for (let column = 0; column < copyBuffer.columns; column++) {
+          const day = bounds.minDay + column;
+          const hour = bounds.minHour + row;
+          if (day <= 6 && hour <= 23) assignments.push({ day, hour, clock: copyBuffer.values[row][column] });
+        }
+      }
+      setSelectedCells(rangeCells(
+        { day: bounds.minDay, hour: bounds.minHour },
+        { day: Math.min(6, bounds.minDay + copyBuffer.columns - 1), hour: Math.min(23, bounds.minHour + copyBuffer.rows - 1) },
+      ));
+    }
     await handleBulkAssign(assignments);
+  };
+
+  const clockMap = useMemo(() => new Map(clockList.map(clock => [clock._id, clock])), [clockList]);
+
+  const assignmentRows = useMemo(() => Array.from({ length: 24 }, (_, hour) => {
+    const row = { hour, hourLabel: `${String(hour).padStart(2, '0')}:00` };
+    for (let day = 0; day < 7; day++) {
+      const entry = selectedGrid?.hours?.find(item => item.day === day && item.hour === hour);
+      row[`day${day}`] = entry?.clock?._id || entry?.clock || '';
+    }
+    return row;
+  }), [selectedGrid]);
+
+  const assignmentColumns = useMemo(() => [
+    {
+      headerName: 'Hour',
+      field: 'hourLabel',
+      pinned: 'left',
+      editable: false,
+      sortable: false,
+      width: 76,
+      suppressMovable: true,
+      cellClass: 'font-mono text-center bg-base-200',
+    },
+    ...DAYS_SHORT.map((dayName, day) => ({
+      headerName: dayName,
+      field: `day${day}`,
+      colId: `day${day}`,
+      flex: 1,
+      minWidth: 110,
+      sortable: false,
+      editable: true,
+      cellEditor: 'agSelectCellEditor',
+      cellEditorParams: {
+        values: ['', ...clockList.map(clock => clock._id)],
+        formatValue: value => clockMap.get(value)?.code || '-',
+      },
+      valueFormatter: params => clockMap.get(params.value)?.code || '-',
+      cellClassRules: {
+        'assignment-cell-selected': params => selectedCellsRef.current.has(cellKey(day, params.data.hour)),
+      },
+      cellStyle: params => {
+        const clock = clockMap.get(params.value);
+        return clock ? { backgroundColor: `${clock.color}20`, borderColor: clock.color } : null;
+      },
+    })),
+  ], [clockList, clockMap]);
+
+  const handleCellValueChanged = event => {
+    const cell = assignmentCell(event.column.getColId(), event.data?.hour);
+    if (!cell || event.newValue === event.oldValue) return;
+    handleAssignClock(cell.day, cell.hour, event.newValue);
   };
 
   const formatPeriod = (grid) => {
@@ -295,7 +404,7 @@ export default function GridsPage() {
       {selectedGrid && (
         <div className="flex items-center gap-2 mb-2 text-xs">
           <span className="text-base-content/50">
-            {selectedCells.size > 0 ? `${selectedCells.size} cells selected` : 'Click cells to select, Shift+click for range, Ctrl/Cmd+click to toggle'}
+            {selectedCells.size > 0 ? `${selectedCells.size} cells selected` : 'Drag to select a range; double-click or press Enter to edit a clock'}
           </span>
           {selectedCells.size > 0 && (
             <>
@@ -312,7 +421,7 @@ export default function GridsPage() {
           )}
           {copyBuffer != null && (
             <span className="text-base-content/40 ml-2">
-              Copied: {clockList.find(c => c._id === copyBuffer)?.code || '-'}
+              Copied: {copyBuffer.rows} × {copyBuffer.columns} cells
             </span>
           )}
         </div>
@@ -320,55 +429,26 @@ export default function GridsPage() {
 
       {/* 7x24 Grid */}
       {selectedGrid ? (
-        <div className="flex-1 overflow-auto border border-base-300 rounded-lg" ref={tableRef} onMouseUp={handleCellMouseUp} onMouseLeave={handleCellMouseUp}>
-          <table className="table table-xs border-collapse w-full">
-            <thead className="sticky top-0 z-10">
-              <tr>
-                <th className="w-16 bg-base-200">Hour</th>
-                {DAYS_SHORT.map(day => (
-                  <th key={day} className="text-center bg-base-200 min-w-28">{day}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 24 }).map((_, hour) => (
-                <tr key={hour}>
-                  <td className="font-mono text-xs bg-base-200 text-center sticky left-0 z-10">
-                    {String(hour).padStart(2, '0')}:00
-                  </td>
-                  {Array.from({ length: 7 }).map((_, day) => {
-                    const clock = getClockForHour(day, hour);
-                    const key = cellKey(day, hour);
-                    const isSelected = selectedCells.has(key);
-                    return (
-                      <td
-                        key={day}
-                        className={`p-0.5 ${isSelected ? 'bg-primary/10' : ''}`}
-                        onMouseEnter={e => handleCellMouseEnter(e, day, hour)}
-                      >
-                        <div className="relative">
-                          <select
-                            data-day={day}
-                            data-hour={hour}
-                            className={`select select-xs w-full bg-base-100 text-base-content font-mono text-xs ${isSelected ? 'ring-1 ring-primary' : ''}`}
-                            style={clock ? { backgroundColor: clock.color + '20', borderColor: clock.color } : {}}
-                            value={clock?._id || ''}
-                            onMouseDown={e => handleCellMouseDown(e, day, hour)}
-                            onChange={e => handleAssignClock(day, hour, e.target.value)}
-                          >
-                            <option className="bg-base-100 text-base-content" value="">-</option>
-                            {clockList.map(c => (
-                              <option className="bg-base-100 text-base-content" key={c._id} value={c._id}>{c.code}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div
+          className={`flex-1 min-h-0 border border-base-300 rounded-lg overflow-hidden assignment-grid ${isDark ? 'ag-theme-alpine-dark' : 'ag-theme-alpine'}`}
+          onMouseUp={() => setIsSelecting(false)}
+          onMouseLeave={() => setIsSelecting(false)}
+        >
+          <AgGridReact
+            theme="legacy"
+            rowData={assignmentRows}
+            columnDefs={assignmentColumns}
+            defaultColDef={{ resizable: true }}
+            getRowId={params => String(params.data.hour)}
+            rowHeight={30}
+            headerHeight={32}
+            stopEditingWhenCellsLoseFocus={true}
+            suppressRowClickSelection={true}
+            onGridReady={event => { gridApiRef.current = event.api; }}
+            onCellMouseDown={handleCellMouseDown}
+            onCellMouseOver={handleCellMouseOver}
+            onCellValueChanged={handleCellValueChanged}
+          />
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
