@@ -1,9 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Music, Plus, Search, Filter, Download, Upload } from 'lucide-react';
+import { Music, Plus, Search, Filter, Download, Upload, ChevronDown, ChevronRight, FolderOpen, FolderClosed, LayoutGrid } from 'lucide-react';
 import CompactGrid from '../components/CompactGrid';
 import { songs, categories, artists } from '../lib/api';
 import { formatDuration, ROTATION_LABELS } from '../lib/utils';
+
+function buildCategoryTree(categoryList) {
+  const map = new Map(categoryList.map(category => [category._id, { ...category, children: [] }]));
+  const roots = [];
+  for (const category of categoryList) {
+    const node = map.get(category._id);
+    if (category.parent && map.has(category.parent)) map.get(category.parent).children.push(node);
+    else roots.push(node);
+  }
+  const prepare = (nodes, inheritedColor = '#6b7280') => nodes
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .forEach(node => {
+      node.effectiveColor = node.color || inheritedColor;
+      prepare(node.children, node.effectiveColor);
+    });
+  prepare(roots);
+  return roots;
+}
 
 export default function LibraryPage() {
   const navigate = useNavigate();
@@ -13,6 +31,8 @@ export default function LibraryPage() {
   const [categoryList, setCategoryList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState({ category: '', rotationLabel: '', genre: '' });
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [categoryExpandedIds, setCategoryExpandedIds] = useState(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({
     title: '', primaryArtistName: '', albumTitle: '', duration: 0,
@@ -148,6 +168,52 @@ export default function LibraryPage() {
     navigate(`/library/${event.data._id}`);
   };
 
+  const categoryTree = buildCategoryTree(categoryList);
+  const selectedCategory = categoryList.find(category => category._id === filters.category);
+  const selectedCategoryParent = selectedCategory?.parent && categoryList.find(category => category._id === selectedCategory.parent);
+  const selectedCategoryLabel = selectedCategory
+    ? `${selectedCategoryParent ? `${selectedCategoryParent.name} | ` : ''}${selectedCategory.name}`
+    : 'All Categories';
+
+  const toggleCategoryExpand = categoryId => {
+    setCategoryExpandedIds(previous => {
+      const next = new Set(previous);
+      if (next.has(categoryId)) next.delete(categoryId); else next.add(categoryId);
+      return next;
+    });
+  };
+
+  const renderCategoryPicker = (nodes, depth = 0) => nodes.map(node => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = categoryExpandedIds.has(node._id);
+    const isSelected = filters.category === node._id;
+    return (
+      <div key={node._id}>
+        <div className={`flex items-center gap-1.5 rounded text-sm ${isSelected ? 'bg-primary/15 text-primary' : 'hover:bg-base-200'}`} style={{ paddingLeft: `${depth * 16 + 4}px` }}>
+          <button className="w-5 h-7 flex items-center justify-center shrink-0" onClick={() => hasChildren && toggleCategoryExpand(node._id)}>
+            {hasChildren ? isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" /> : null}
+          </button>
+          <button
+            className="flex flex-1 min-w-0 items-center gap-1.5 py-1 pr-2 text-left"
+            onClick={() => {
+              setFilters(current => ({ ...current, category: node._id }));
+              setShowCategoryPicker(false);
+            }}
+          >
+            <span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ backgroundColor: node.effectiveColor }}>
+              {hasChildren
+                ? isExpanded ? <FolderOpen className="w-2.5 h-2.5 text-white" /> : <FolderClosed className="w-2.5 h-2.5 text-white" />
+                : <Music className="w-2.5 h-2.5 text-white" />}
+            </span>
+            <span className="truncate flex-1">{node.name}</span>
+            <span className="font-mono text-[10px] text-base-content/30">{node.code}</span>
+          </button>
+        </div>
+        {hasChildren && isExpanded && renderCategoryPicker(node.children, depth + 1)}
+      </div>
+    );
+  });
+
   const handleAddSong = async () => {
     try {
       const data = { ...addForm };
@@ -197,16 +263,30 @@ export default function LibraryPage() {
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
-        <select
-          className="select select-bordered select-sm"
-          value={filters.category}
-          onChange={e => setFilters(f => ({ ...f, category: e.target.value }))}
-        >
-          <option value="">All Categories</option>
-          {categoryList.map(c => (
-            <option key={c._id} value={c._id}>{c.code} - {c.name}</option>
-          ))}
-        </select>
+        <div className="relative">
+          <button
+            className="btn btn-sm btn-ghost bg-base-100 border border-base-300 w-60 justify-between font-normal"
+            onClick={() => setShowCategoryPicker(previous => !previous)}
+          >
+            <span className="truncate">{selectedCategoryLabel}</span>
+            <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+          </button>
+          {showCategoryPicker && (
+            <div className="absolute left-0 top-full mt-1 z-30 w-80 max-h-96 overflow-y-auto rounded-lg border border-base-300 bg-base-100 p-1 shadow-xl">
+              <button
+                className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${filters.category ? 'hover:bg-base-200' : 'bg-primary/15 text-primary'}`}
+                onClick={() => {
+                  setFilters(current => ({ ...current, category: '' }));
+                  setShowCategoryPicker(false);
+                }}
+              >
+                <LayoutGrid className="w-4 h-4" /> All Categories
+              </button>
+              {renderCategoryPicker(categoryTree)}
+            </div>
+          )}
+        </div>
+        {showCategoryPicker && <div className="fixed inset-0 z-20" onClick={() => setShowCategoryPicker(false)} />}
         <select
           className="select select-bordered select-sm"
           value={filters.rotationLabel}
