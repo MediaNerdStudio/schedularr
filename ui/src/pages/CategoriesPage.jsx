@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import CompactGrid from '../components/CompactGrid';
 import {
   FolderOpen, FolderClosed, Plus, Pencil, Trash2, Music, ChevronRight, ChevronDown,
@@ -313,7 +313,7 @@ export default function CategoriesPage() {
 
   const closeContextMenu = () => setContextMenu(null);
 
-  const columnDefs = [
+  const columnDefs = useMemo(() => [
     {
       headerName: '', colId: 'select', width: 40, checkboxSelection: true, headerCheckboxSelection: true,
       pinned: 'left', suppressHeaderMenuButton: true, lockPosition: true, sortable: false, filter: false,
@@ -354,9 +354,9 @@ export default function CategoriesPage() {
       headerName: 'Omni ItemCode', colId: 'omniItemCode', width: 120, hide: true,
       valueGetter: p => p.data?.externalIds?.omniItemCode || '', cellClass: 'font-mono text-[10px]',
     },
-  ];
+  ], []);
 
-  const defaultColDef = { sortable: true, filter: true, resizable: true };
+  const defaultColDef = useMemo(() => ({ sortable: true, filter: true, resizable: true }), []);
 
   const renderTreeNode = (node, depth = 0) => {
     const hasChildren = node.children?.length > 0;
@@ -498,6 +498,7 @@ export default function CategoriesPage() {
                 rowData={catSongs}
                 columnDefs={columnDefs}
                 defaultColDef={defaultColDef}
+                persistenceKey="categories:songs-grid"
                 rowSelection="multiple"
                 onSelectionChanged={onSelectionChanged}
                 getRowId={p => p.data._id}

@@ -16,12 +16,15 @@ const CompactGrid = forwardRef(({
   rowHeight = 28,
   headerHeight = 30,
   additionalActions,
+  persistenceKey,
 }, ref) => {
   const innerRef = useRef(null);
   useImperativeHandle(ref, () => innerRef.current, [innerRef]);
 
   const [isDark, setIsDark] = useState(false);
-  const [quickFilter, setQuickFilter] = useState('');
+  const [quickFilter, setQuickFilter] = useState(() => persistenceKey
+    ? sessionStorage.getItem(`${persistenceKey}:search`) || ''
+    : '');
   const [showPicker, setShowPicker] = useState(false);
   const [gridReady, setGridReady] = useState(false);
 
@@ -65,7 +68,8 @@ const CompactGrid = forwardRef(({
     if (gridReady && innerRef.current?.api) {
       innerRef.current.api.setGridOption('quickFilterText', quickFilter);
     }
-  }, [quickFilter, gridReady]);
+    if (persistenceKey) sessionStorage.setItem(`${persistenceKey}:search`, quickFilter);
+  }, [quickFilter, gridReady, persistenceKey]);
 
   const onGridReady = (event) => {
     setGridReady(true);
@@ -79,6 +83,22 @@ const CompactGrid = forwardRef(({
       next[key] = visible;
     });
     setVisibility(next);
+    if (persistenceKey) {
+      try {
+        const savedSort = JSON.parse(sessionStorage.getItem(`${persistenceKey}:sort`) || '[]');
+        if (savedSort.length) api.applyColumnState({ state: savedSort, defaultState: { sort: null } });
+      } catch {
+        sessionStorage.removeItem(`${persistenceKey}:sort`);
+      }
+    }
+  };
+
+  const handleSortChanged = (event) => {
+    if (!persistenceKey) return;
+    const sortState = event.api.getColumnState()
+      .filter(column => column.sort)
+      .map(({ colId, sort, sortIndex }) => ({ colId, sort, sortIndex }));
+    sessionStorage.setItem(`${persistenceKey}:sort`, JSON.stringify(sortState));
   };
 
   const toggleColumn = (key) => {
@@ -178,6 +198,7 @@ const CompactGrid = forwardRef(({
           overlayLoadingTemplate='<span class="loading loading-spinner loading-sm"></span>'
           overlayNoRowsTemplate={`<span class="text-base-content/40 text-sm">${noRowsMessage}</span>`}
           onGridReady={onGridReady}
+          onSortChanged={handleSortChanged}
         />
       </div>
     </div>
