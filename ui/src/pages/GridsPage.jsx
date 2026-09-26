@@ -367,7 +367,24 @@ export default function GridsPage() {
   const handleCellValueChanged = event => {
     const cell = assignmentCell(event.column.getColId(), event.data?.hour);
     if (!cell || event.newValue === event.oldValue) return;
-    handleAssignClock(cell.day, cell.hour, event.newValue);
+    const input = String(event.newValue || '').trim();
+    let clockId = '';
+    if (input) {
+      const normalized = input.toLowerCase();
+      const direct = clockMap.get(input)
+        || clocksByName.get(normalized)
+        || clockList.find(item => item.code.toLowerCase() === normalized);
+      const matches = direct ? [direct] : clockList.filter(item => item.name.toLowerCase().includes(normalized));
+      if (matches.length !== 1) {
+        event.data[event.column.getColId()] = event.oldValue;
+        event.api.refreshCells({ rowNodes: [event.node], columns: [event.column], force: true });
+        return;
+      }
+      clockId = matches[0]._id;
+    }
+    event.data[event.column.getColId()] = clockId;
+    event.api.refreshCells({ rowNodes: [event.node], columns: [event.column], force: true });
+    handleAssignClock(cell.day, cell.hour, clockId);
   };
 
   const formatPeriod = (grid) => {
