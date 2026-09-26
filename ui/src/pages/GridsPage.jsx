@@ -4,6 +4,33 @@ import { CalendarDays, Plus, Trash2, Copy, ClipboardPaste, X, Check, Star, Calen
 import { grids, clocks as clocksApi, stations as stationsApi } from '../lib/api';
 import { DAYS_SHORT } from '../lib/utils';
 
+function ClockAutocompleteEditor({ value, onValueChange, clocks, node, column }) {
+  const inputRef = useRef(null);
+  const selectedClock = clocks.find(clock => clock._id === value);
+  const listId = `clock-options-${node.rowIndex}-${column.getColId()}`;
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="w-full h-full px-2 bg-base-100 text-base-content outline-none"
+        list={listId}
+        value={selectedClock?.name || value || ''}
+        onChange={event => onValueChange(event.target.value)}
+        placeholder="Type a clock name..."
+      />
+      <datalist id={listId}>
+        {clocks.map(clock => <option key={clock._id} value={clock.name}>{clock.code}</option>)}
+      </datalist>
+    </>
+  );
+}
+
 export default function GridsPage() {
   const [gridList, setGridList] = useState([]);
   const [clockList, setClockList] = useState([]);
@@ -315,8 +342,8 @@ export default function GridsPage() {
       minWidth: 110,
       sortable: false,
       editable: true,
-      cellEditor: 'agTextCellEditor',
-      cellEditorParams: { useFormatter: true },
+      cellEditor: ClockAutocompleteEditor,
+      cellEditorParams: { clocks: clockList },
       valueFormatter: params => clockMap.get(params.value)?.name || '',
       valueParser: params => {
         const input = String(params.newValue || '').trim();
