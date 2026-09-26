@@ -97,13 +97,13 @@ router.get('/', async (req, res) => {
         populate: {
           path: 'categoryAssignments.category',
           select: 'code name color parent',
-          populate: { path: 'parent', select: 'color' },
+          populate: { path: 'parent', select: 'name color' },
         },
       })
       .populate({
         path: 'items.category',
         select: 'code name color parent',
-        populate: { path: 'parent', select: 'color' },
+        populate: { path: 'parent', select: 'name color' },
       })
       .sort('date hour');
     res.json(hours);
