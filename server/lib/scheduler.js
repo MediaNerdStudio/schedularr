@@ -230,6 +230,18 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
 /**
  * Schedule a fixed category element — pick the best song from the category.
  */
+function categoryDescendantIds(categoryId, categoryMap) {
+  const ids = [categoryId];
+  for (let index = 0; index < ids.length; index++) {
+    for (const candidate of categoryMap.values()) {
+      if (candidate.parent?.toString() === ids[index] && !ids.includes(candidate._id.toString())) {
+        ids.push(candidate._id.toString());
+      }
+    }
+  }
+  return ids;
+}
+
 async function scheduleFixedElement(element, ctx) {
   const { stationId, date, hour, rules, categoryMap, candidateCache, playLog, estimatedStart } = ctx;
   const categoryId = element.category?._id?.toString() || element.category?.toString();
@@ -253,10 +265,12 @@ async function scheduleFixedElement(element, ctx) {
     };
   }
 
+  const includedCategoryIds = categoryDescendantIds(categoryId, categoryMap);
+  const includedCategorySet = new Set(includedCategoryIds);
   let candidates = candidateCache.get(categoryId);
   if (!candidates) {
     candidates = await Song.find({
-      'categoryAssignments.category': category._id,
+      'categoryAssignments.category': { $in: includedCategoryIds },
       isActive: true,
       isArchived: { $ne: true },
     })
@@ -277,9 +291,12 @@ async function scheduleFixedElement(element, ctx) {
   // Evaluate each candidate against rules
   const scored = [];
   for (const song of candidates) {
-    const evaluation = evaluateRules(song, category, rules, playLog, estimatedStart);
+    const matchingAssignments = (song.categoryAssignments || []).filter(assignment => includedCategorySet.has(assignment.category.toString()));
+    const selectedAssignment = matchingAssignments.find(assignment => assignment.category.toString() !== categoryId) || matchingAssignments[0];
+    const selectedCategory = categoryMap.get(selectedAssignment?.category.toString()) || category;
+    const evaluation = evaluateRules(song, selectedCategory, rules, playLog, estimatedStart);
     const weight = Math.max(1, song.weight || 50);
-    scored.push({ song, evaluation, randomRank: Math.pow(Math.random(), 100 / weight) });
+    scored.push({ song, selectedCategory, evaluation, randomRank: Math.pow(Math.random(), 100 / weight) });
   }
 
   // Sort: unbreakable violations first (eliminate), then by score (fewer violations = better)
@@ -308,7 +325,7 @@ async function scheduleFixedElement(element, ctx) {
     position: element.position,
     type: element.type === 'imaging' ? 'imaging' : 'song',
     song: song._id,
-    category: category._id,
+    category: best.selectedCategory._id,
     title: song.title,
     artist: song.artistDisplay || song.primaryArtist?.name || '',
     duration: song.duration || element.estimatedDuration || 0,
