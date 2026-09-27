@@ -26,7 +26,8 @@ import {
  * @returns {Object} - { hours: ScheduleHour[], stats: {} }
  */
 export async function scheduleHours(options) {
-  const { stationId, date, startHour = 0, endHour = 23, gridId } = options;
+  const startedAt = Date.now();
+  const { stationId, date, startHour = 0, endHour = 23, gridId, dryRun = false } = options;
 
   // 1. Load the grid (or find active one)
   const grid = gridId
@@ -65,13 +66,14 @@ export async function scheduleHours(options) {
   }).lean();
 
   // Build a unified play log (history + already scheduled items from today)
-  const playLog = buildPlayLog(recentHistory, existingSchedule);
+  const playIndex = buildPlayIndex(buildPlayLog(recentHistory, existingSchedule));
 
   // 5. Determine day of week for grid lookup (0=Mon, 6=Sun)
   const jsDay = new Date(date).getDay(); // 0=Sun
   const gridDay = jsDay === 0 ? 6 : jsDay - 1; // convert to 0=Mon
 
   const results = [];
+  const pendingHours = [];
   const stats = { totalSongs: 0, totalViolations: 0, unscheduledPositions: 0 };
   const candidateCache = new Map();
 
@@ -90,30 +92,39 @@ export async function scheduleHours(options) {
 
     if (!clock || !clock.elements?.length) {
       // No clock assigned — create empty hour
-      const emptyHour = await ScheduleHour.findOneAndUpdate(
-        { station: stationId, date, hour },
-        { station: stationId, date, hour, clock: clock?._id, items: [], status: 'empty' },
-        { upsert: true, returnDocument: "after" }
-      );
+      const emptyHour = { station: stationId, date, hour, clock: clock?._id, items: [], status: 'empty' };
       results.push(emptyHour);
+      pendingHours.push(emptyHour);
       stats.unscheduledPositions++;
       continue;
     }
 
     // Schedule this hour
     const scheduledHour = await scheduleOneHour({
-      stationId, date, hour, clock, rules, categoryMap, candidateCache, playLog, stats,
+      stationId, date, hour, clock, rules, categoryMap, candidateCache, playIndex, stats,
     });
     results.push(scheduledHour);
+    pendingHours.push(scheduledHour);
   }
 
+  if (!dryRun && pendingHours.length) {
+    await ScheduleHour.bulkWrite(pendingHours.map(hourData => ({
+      updateOne: {
+        filter: { station: stationId, date, hour: hourData.hour },
+        update: { $set: hourData },
+        upsert: true,
+      },
+    })), { ordered: true });
+  }
+
+  stats.durationMs = Date.now() - startedAt;
   return { hours: results, stats };
 }
 
 /**
  * Schedule a single hour.
  */
-async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMap, candidateCache, playLog, stats }) {
+async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMap, candidateCache, playIndex, stats }) {
   const items = [];
   let runningTime = 0; // ms into the hour
 
@@ -133,13 +144,13 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
       case 'fixed':
       case 'imaging': {
         item = await scheduleFixedElement(element, {
-          stationId, date, hour, rules, categoryMap, candidateCache, playLog, estimatedStart, stats,
+          stationId, date, hour, rules, categoryMap, candidateCache, playIndex, estimatedStart, stats,
         });
         break;
       }
       case 'song': {
         item = await scheduleSpecificSong(element, {
-          rules, categoryMap, playLog, estimatedStart, stats,
+          rules, categoryMap, playIndex, estimatedStart, stats,
         });
         break;
       }
@@ -191,7 +202,7 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
       items.push(item);
       runningTime += item.duration || 0;
       if (item.song) {
-        playLog.unshift({
+        addPlayToIndex(playIndex, {
           song: item.song.toString(),
           artist: item.artist,
           title: item.title,
@@ -208,23 +219,17 @@ async function scheduleOneHour({ stationId, date, hour, clock, rules, categoryMa
   const totalDuration = items.reduce((sum, i) => sum + (i.duration || 0), 0);
   const overrun = totalDuration - 3600000; // vs 60 minutes
 
-  // Save the schedule hour
-  const scheduleHour = await ScheduleHour.findOneAndUpdate(
-    { station: stationId, date, hour },
-    {
-      station: stationId, date, hour,
-      clock: clock._id,
-      items,
-      status: 'scheduled',
-      totalDuration,
-      overrun,
-      scheduledAt: new Date(),
-      scheduledBy: 'auto',
-    },
-    { upsert: true, returnDocument: "after" }
-  );
-
-  return scheduleHour;
+  // Build the schedule hour for the batched write
+  return {
+    station: stationId, date, hour,
+    clock: clock._id,
+    items,
+    status: 'scheduled',
+    totalDuration,
+    overrun,
+    scheduledAt: new Date(),
+    scheduledBy: 'auto',
+  };
 }
 
 /**
@@ -243,7 +248,7 @@ function categoryDescendantIds(categoryId, categoryMap) {
 }
 
 async function scheduleFixedElement(element, ctx) {
-  const { stationId, date, hour, rules, categoryMap, candidateCache, playLog, estimatedStart } = ctx;
+  const { stationId, date, hour, rules, categoryMap, candidateCache, playIndex, estimatedStart } = ctx;
   const categoryId = element.category?._id?.toString() || element.category?.toString();
 
   if (!categoryId) {
@@ -274,6 +279,7 @@ async function scheduleFixedElement(element, ctx) {
       isActive: true,
       isArchived: { $ne: true },
     })
+      .select('title primaryArtist artistDisplay duration weight categoryAssignments dayparting')
       .populate('primaryArtist', 'name separationGroup')
       .lean();
     candidateCache.set(categoryId, candidates);
@@ -294,28 +300,22 @@ async function scheduleFixedElement(element, ctx) {
     const matchingAssignments = (song.categoryAssignments || []).filter(assignment => includedCategorySet.has(assignment.category.toString()));
     const selectedAssignment = matchingAssignments.find(assignment => assignment.category.toString() !== categoryId) || matchingAssignments[0];
     const selectedCategory = categoryMap.get(selectedAssignment?.category.toString()) || category;
-    const evaluation = evaluateRules(song, selectedCategory, rules, playLog, estimatedStart);
+    const evaluation = evaluateRules(song, selectedCategory, rules, playIndex, estimatedStart);
     const weight = Math.max(1, song.weight || 50);
     scored.push({ song, selectedCategory, evaluation, randomRank: Math.pow(Math.random(), 100 / weight) });
   }
 
-  // Sort: unbreakable violations first (eliminate), then by score (fewer violations = better)
-  scored.sort((a, b) => {
-    // Songs with unbreakable violations go to the bottom
-    if (a.evaluation.hasUnbreakable !== b.evaluation.hasUnbreakable) {
-      return a.evaluation.hasUnbreakable ? 1 : -1;
-    }
-    // Fewer total violations = better
-    if (a.evaluation.totalViolations !== b.evaluation.totalViolations) {
-      return a.evaluation.totalViolations - b.evaluation.totalViolations;
-    }
-    if (a.evaluation.score !== b.evaluation.score) {
-      return b.evaluation.score - a.evaluation.score;
-    }
-    return b.randomRank - a.randomRank;
-  });
-
-  const best = scored[0];
+  const isBetter = (candidate, current) => {
+    if (!current) return true;
+    if (candidate.evaluation.hasUnbreakable !== current.evaluation.hasUnbreakable) return !candidate.evaluation.hasUnbreakable;
+    if (candidate.evaluation.totalViolations !== current.evaluation.totalViolations) return candidate.evaluation.totalViolations < current.evaluation.totalViolations;
+    if (candidate.evaluation.score !== current.evaluation.score) return candidate.evaluation.score > current.evaluation.score;
+    return candidate.randomRank > current.randomRank;
+  };
+  let best = null;
+  for (const candidate of scored) {
+    if (isBetter(candidate, best)) best = candidate;
+  }
   const song = best.song;
 
   ctx.stats.totalViolations += best.evaluation.totalViolations;
@@ -344,7 +344,7 @@ async function scheduleFixedElement(element, ctx) {
  * Schedule a specific fixed song element (e.g., a news service song).
  */
 async function scheduleSpecificSong(element, ctx) {
-  const { rules, categoryMap, playLog, estimatedStart, stats } = ctx;
+  const { rules, categoryMap, playIndex, estimatedStart, stats } = ctx;
   const songId = element.song?._id?.toString?.() || element.song?.toString?.() || element.song;
 
   if (!songId) {
@@ -380,7 +380,7 @@ async function scheduleSpecificSong(element, ctx) {
   }
 
   if (category) {
-    const evaluation = evaluateRules(song, category, rules, playLog, estimatedStart);
+    const evaluation = evaluateRules(song, category, rules, playIndex, estimatedStart);
     violations = evaluation.violations;
     hasUnbreakable = evaluation.hasUnbreakable;
     stats.totalViolations += evaluation.totalViolations;
@@ -409,12 +409,32 @@ async function scheduleSpecificSong(element, ctx) {
 /**
  * Evaluate all applicable rules for a candidate song.
  */
-function evaluateRules(song, category, rules, playLog, scheduledTime) {
+function buildPlayIndex(entries) {
+  const index = { song: new Map(), artist: new Map(), title: new Map() };
+  for (const entry of entries) addPlayToIndex(index, entry);
+  return index;
+}
+
+function addPlayToIndex(index, entry) {
+  for (const [type, key] of [['song', entry.song], ['artist', entry.artist], ['title', entry.title]]) {
+    if (!key) continue;
+    const entries = index[type].get(key) || [];
+    const playedAt = new Date(entry.playedAt).getTime();
+    const position = entries.findIndex(existing => new Date(existing.playedAt).getTime() < playedAt);
+    if (position < 0) entries.push(entry); else entries.splice(position, 0, entry);
+    index[type].set(key, entries);
+  }
+}
+
+function indexedPlays(index, type, key) {
+  return key ? index[type].get(key) || [] : [];
+}
+
+function evaluateRules(song, category, rules, playIndex, scheduledTime) {
   const violations = [];
-  const repeatedThisHour = playLog.some(entry => {
+  const repeatedThisHour = indexedPlays(playIndex, 'song', song._id.toString()).some(entry => {
     const playedAt = new Date(entry.playedAt);
-    return entry.song === song._id.toString()
-      && playedAt.getFullYear() === scheduledTime.getFullYear()
+    return playedAt.getFullYear() === scheduledTime.getFullYear()
       && playedAt.getMonth() === scheduledTime.getMonth()
       && playedAt.getDate() === scheduledTime.getDate()
       && playedAt.getHours() === scheduledTime.getHours();
@@ -432,7 +452,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
 
   // Song separation
   if (catRules.songSeparation > 0) {
-    const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
+    const lastPlay = findLastPlay(playIndex, { songId: song._id.toString(), before: scheduledTime });
     if (lastPlay) {
       const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
       if (minutesSince < catRules.songSeparation) {
@@ -449,7 +469,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
   if (catRules.artistPrimarySeparation > 0 && song.primaryArtist) {
     const artistName = song.primaryArtist.name || song.artistDisplay;
     const artistGroup = song.primaryArtist.separationGroup || artistName;
-    const lastArtistPlay = findLastPlay(playLog, { artistName: artistGroup, before: scheduledTime });
+    const lastArtistPlay = findLastPlay(playIndex, { artistName: artistGroup, before: scheduledTime });
     if (lastArtistPlay) {
       const minutesSince = (scheduledTime - lastArtistPlay.playedAt) / 60000;
       if (minutesSince < catRules.artistPrimarySeparation) {
@@ -464,7 +484,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
 
   // Title separation
   if (catRules.titleSeparation > 0) {
-    const lastTitlePlay = findLastPlay(playLog, { title: song.title, before: scheduledTime });
+    const lastTitlePlay = findLastPlay(playIndex, { title: song.title, before: scheduledTime });
     if (lastTitlePlay && lastTitlePlay.song !== song._id.toString()) {
       const minutesSince = (scheduledTime - lastTitlePlay.playedAt) / 60000;
       if (minutesSince < catRules.titleSeparation) {
@@ -481,10 +501,10 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
   if (catRules.maxPlaysPerDay > 0) {
     const todayStart = new Date(scheduledTime);
     todayStart.setHours(0, 0, 0, 0);
-    const playsToday = playLog.filter(p =>
-      p.song === song._id.toString() &&
-      new Date(p.playedAt) >= todayStart
-    ).length;
+    const playsToday = indexedPlays(playIndex, 'song', song._id.toString()).filter(entry => {
+      const playedAt = new Date(entry.playedAt);
+      return playedAt >= todayStart && playedAt <= scheduledTime;
+    }).length;
     if (playsToday >= catRules.maxPlaysPerDay) {
       violations.push({
         ruleName: 'Max Plays Per Day',
@@ -499,10 +519,10 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
     const artistName = song.primaryArtist.name || song.artistDisplay;
     const todayStart = new Date(scheduledTime);
     todayStart.setHours(0, 0, 0, 0);
-    const artistPlaysToday = playLog.filter(p =>
-      p.artist === artistName &&
-      new Date(p.playedAt) >= todayStart
-    ).length;
+    const artistPlaysToday = indexedPlays(playIndex, 'artist', artistName).filter(entry => {
+      const playedAt = new Date(entry.playedAt);
+      return playedAt >= todayStart && playedAt <= scheduledTime;
+    }).length;
     if (artistPlaysToday >= catRules.artistMaxPlaysPerDay) {
       violations.push({
         ruleName: 'Artist Max Plays Per Day',
@@ -515,11 +535,11 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
   // Same hour separation (artist can't be in same hour for X days)
   if (catRules.artistSameHourSeparation > 0 && song.primaryArtist) {
     const artistName = song.primaryArtist.name || song.artistDisplay;
-    const sameHourPlays = playLog.filter(p => {
-      if (p.artist !== artistName) return false;
-      const pDate = new Date(p.playedAt);
-      return pDate.getHours() === scheduledTime.getHours() &&
-        (scheduledTime - pDate) / 86400000 < catRules.artistSameHourSeparation;
+    const sameHourPlays = indexedPlays(playIndex, 'artist', artistName).filter(entry => {
+      const playedAt = new Date(entry.playedAt);
+      return playedAt <= scheduledTime
+        && playedAt.getHours() === scheduledTime.getHours()
+        && (scheduledTime - playedAt) / 86400000 < catRules.artistSameHourSeparation;
     });
     if (sameHourPlays.length > 0) {
       violations.push({
@@ -535,7 +555,7 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
     // Skip rules not applicable to this category
     if (rule.category && rule.category.toString() !== category._id.toString()) continue;
 
-    const violation = evaluateExternalRule(rule, song, playLog, scheduledTime);
+    const violation = evaluateExternalRule(rule, song, playIndex, scheduledTime);
     if (violation) violations.push(violation);
   }
 
@@ -558,21 +578,21 @@ function evaluateRules(song, category, rules, playLog, scheduledTime) {
     totalViolations: violations.length,
     hasUnbreakable: violations.some(v => v.severity === 'unbreakable'),
     breakableCount: violations.filter(v => v.severity === 'breakable').length,
-    score: calculateGoalScore(song, playLog, scheduledTime),
+    score: calculateGoalScore(song, playIndex, scheduledTime),
   };
 }
 
 /**
  * Evaluate a Rule document against a song.
  */
-function evaluateExternalRule(rule, song, playLog, scheduledTime) {
+function evaluateExternalRule(rule, song, playIndex, scheduledTime) {
   const severity = rule.isBreakable ? 'breakable' : 'unbreakable';
   const params = rule.params || {};
 
   switch (rule.type) {
     case 'song-minimum-rest': {
       if (!params.separation) return null;
-      const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
+      const lastPlay = findLastPlay(playIndex, { songId: song._id.toString(), before: scheduledTime });
       if (lastPlay) {
         const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
         if (minutesSince < params.separation) {
@@ -585,7 +605,7 @@ function evaluateExternalRule(rule, song, playLog, scheduledTime) {
     case 'artist-primary-separation': {
       if (!params.separation || !song.primaryArtist) return null;
       const artistName = song.primaryArtist.name || song.artistDisplay;
-      const lastPlay = findLastPlay(playLog, { artistName, before: scheduledTime });
+      const lastPlay = findLastPlay(playIndex, { artistName, before: scheduledTime });
       if (lastPlay) {
         const minutesSince = (scheduledTime - lastPlay.playedAt) / 60000;
         if (minutesSince < params.separation) {
@@ -599,7 +619,10 @@ function evaluateExternalRule(rule, song, playLog, scheduledTime) {
       if (!params.maxCount) return null;
       const todayStart = new Date(scheduledTime);
       todayStart.setHours(0, 0, 0, 0);
-      const plays = playLog.filter(p => p.song === song._id.toString() && new Date(p.playedAt) >= todayStart).length;
+      const plays = indexedPlays(playIndex, 'song', song._id.toString()).filter(entry => {
+        const playedAt = new Date(entry.playedAt);
+        return playedAt >= todayStart && playedAt <= scheduledTime;
+      }).length;
       if (plays >= params.maxCount) {
         return { ruleName: rule.name, severity, description: `${plays} plays today (max: ${params.maxCount})` };
       }
@@ -615,11 +638,11 @@ function evaluateExternalRule(rule, song, playLog, scheduledTime) {
  * Optimum Goal Scoring — weighted tie-breaking score.
  * Higher score = better candidate.
  */
-function calculateGoalScore(song, playLog, scheduledTime) {
+function calculateGoalScore(song, playIndex, scheduledTime) {
   let score = 0;
 
   // Goal 1: Optimum Song Rest (prefer songs that haven't played in a while)
-  const lastPlay = findLastPlay(playLog, { songId: song._id.toString(), before: scheduledTime });
+  const lastPlay = findLastPlay(playIndex, { songId: song._id.toString(), before: scheduledTime });
   if (lastPlay) {
     const hoursSince = (scheduledTime - lastPlay.playedAt) / 3600000;
     score += Math.min(hoursSince, 168); // cap at 1 week
@@ -633,7 +656,7 @@ function calculateGoalScore(song, playLog, scheduledTime) {
   // Goal 3: Artist spread (prefer artists not recently played)
   const artistName = song.primaryArtist?.name || song.artistDisplay;
   if (artistName) {
-    const lastArtistPlay = findLastPlay(playLog, { artistName, before: scheduledTime });
+    const lastArtistPlay = findLastPlay(playIndex, { artistName, before: scheduledTime });
     if (lastArtistPlay) {
       const hoursSince = (scheduledTime - lastArtistPlay.playedAt) / 3600000;
       score += Math.min(hoursSince, 48) * 0.3;
@@ -648,14 +671,12 @@ function calculateGoalScore(song, playLog, scheduledTime) {
 /**
  * Find the most recent play matching criteria.
  */
-function findLastPlay(playLog, criteria) {
-  for (const entry of playLog) {
-    if (criteria.before && new Date(entry.playedAt) > criteria.before) continue;
-    if (criteria.songId && entry.song === criteria.songId) return entry;
-    if (criteria.artistName && entry.artist === criteria.artistName) return entry;
-    if (criteria.title && entry.title === criteria.title) return entry;
-  }
-  return null;
+function findLastPlay(playIndex, criteria) {
+  let entries = [];
+  if (criteria.songId) entries = indexedPlays(playIndex, 'song', criteria.songId);
+  else if (criteria.artistName) entries = indexedPlays(playIndex, 'artist', criteria.artistName);
+  else if (criteria.title) entries = indexedPlays(playIndex, 'title', criteria.title);
+  return entries.find(entry => !criteria.before || new Date(entry.playedAt) <= criteria.before) || null;
 }
 
 /**

@@ -171,6 +171,7 @@ export default function SchedulePage() {
               <span>Songs: {lastStats.totalSongs}</span>
               <span>Violations: {lastStats.totalViolations}</span>
               <span>Empty: {lastStats.unscheduledPositions}</span>
+              {lastStats.durationMs != null && <span>Time: {(lastStats.durationMs / 1000).toFixed(1)}s</span>}
             </div>
           )}
         </div>
