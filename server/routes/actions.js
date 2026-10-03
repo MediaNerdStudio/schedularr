@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { previewOmniDuplexx, syncOmniDuplexx } from '../lib/omniDuplexx.js';
 import { prepareWestRadioChartSync, syncWestRadioCharts, westRadioChartSyncSummary } from '../lib/liveCharts.js';
+import { previewGoogleSheetSync, syncGoogleSheet } from '../lib/googleSheetSync.js';
 
 const router = Router();
 let omniSyncRunning = false;
 let chartSyncRunning = false;
+let sheetSyncRunning = false;
 
 function selection(body) {
   const mode = body.mode === 'future' ? 'future' : 'specific';
@@ -72,6 +74,27 @@ router.post('/westradio-charts/sync', async (req, res) => {
     sendError(res, error);
   } finally {
     chartSyncRunning = false;
+  }
+});
+
+router.post('/google-sheet/preview', async (_req, res) => {
+  try {
+    res.json(await previewGoogleSheetSync());
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post('/google-sheet/sync', async (req, res) => {
+  if (sheetSyncRunning) return res.status(409).json({ error: 'Another Google Sheet synchronization is already running' });
+  try {
+    if (req.body.confirm !== true) return res.status(400).json({ error: 'Explicit confirmation is required' });
+    sheetSyncRunning = true;
+    res.json(await syncGoogleSheet());
+  } catch (error) {
+    sendError(res, error);
+  } finally {
+    sheetSyncRunning = false;
   }
 });
 
